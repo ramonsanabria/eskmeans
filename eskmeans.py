@@ -1,11 +1,15 @@
 #!/usr/bin/env python3
 
 import collections
+import sys
 import pickle
 import kaldiark
 import random
 import numpy
 import numpy.linalg
+import scipy.signal as signal
+
+random.seed(0)
 
 
 def subsample(feats, n):
@@ -17,14 +21,28 @@ def subsample(feats, n):
 
     return numpy.array(result)
 
+def subsample_herman(feats, n):
+    feats_t = feats.T
 
+    y_new = signal.resample(feats_t, n, axis=1).flatten("C")
+    #print(y_new)
+    #k = len(feats) / n
+
+    #result = []
+    #for i in range(n):
+    #    result.extend(feats[int(k * i)])
+
+    return numpy.array(y_new)
+
+#TODO matrice this function
 def assign_cluster(v, centroids):
-    m = float('inf')
+    m = float('-inf')
     arg = -1
     for i, u in enumerate(centroids):
         cand = numpy.linalg.norm(u - v)
-        cand = cand * cand
-        if cand < m:
+        cand = -cand * cand 
+            
+        if cand > m:
             m = cand
             arg = i
 
@@ -35,6 +53,7 @@ class Graph:
     def __init__(self):
         self.vertices = 0
         self.edges = 0
+        self.min_duration = 20
         self.tail = {}
         self.head = {}
         self.time = {}
@@ -59,14 +78,24 @@ class Graph:
     def feat(self, e):
         s = self.time[self.tail[e]]
         t = self.time[self.head[e]]
-        v = subsample(self.feats[s:t], 10)
+        v = subsample_herman(self.feats[s:t+1], 10)
         return v
 
     def weight(self, e):
         v = self.feat(e)
-        arg, m = assign_cluster(v, centroids)
-        return m
+        d = self.duration(e)
+        if(d < self.min_duration):
+            d = float('inf')
+        _, m = assign_cluster(v, centroids)
 
+        return m * d
+
+    def duration(self, e):
+
+        s = self.time[self.tail[e]]
+        t = self.time[self.head[e]]
+
+        return t-s
 
 def build_graph(landmarks):
     g = Graph()
@@ -97,10 +126,10 @@ def shortest_path(g):
     for v in range(1, g.vertices):
 
         arg = -1
-        m = float('inf')
+        m = float('-inf')
         for e in g.in_edges[v]:
             cand = d[g.tail[e]] + g.weight(e)
-            if cand < m:
+            if cand > m:
                 m = cand
                 arg = e
 
@@ -113,6 +142,7 @@ def shortest_path(g):
     #
     path = []
     v = g.vertices - 1
+    print(d[v])
     while v != 0:
         e = back[v]
         path.append(e)
@@ -148,6 +178,7 @@ def eskmeans_init(landmark_sets, feat_scp, ncentroid):
         edges = list(range(g.edges))
         random.shuffle(edges)
 
+
         for e in edges[:ncentroid_per_scp]:
             if k == ncentroid:
                 break
@@ -157,16 +188,17 @@ def eskmeans_init(landmark_sets, feat_scp, ncentroid):
 
         if k == ncentroid:
             break
-
+    centroids = numpy.load("./centroids.npy")
     return centroids
 
 
-def eskmeans(landmark_sets, feat_scp, centroids, nepoch):
+def eskmeans(landmark_sets, feat_scp, centroids, nepoch, min_duration):
     for epoch in range(nepoch):
         sums = numpy.zeros(centroids.shape)
         counts = numpy.zeros(centroids.shape[0])
 
         for i, scp in enumerate(feat_scp):
+            print(scp)
             landmarks = landmark_sets[i]
 
             f = open(scp[1], 'rb')
@@ -184,13 +216,16 @@ def eskmeans(landmark_sets, feat_scp, centroids, nepoch):
 
             for e in path:
                 v = g.feat(e)
+                d = g.duration(e)
+
                 arg, m = assign_cluster(v, centroids)
+
                 sums[arg] = sums[arg] * (counts[arg] / (counts[arg] + 1)) + v / (counts[arg] + 1)
                 counts[arg] += 1
-                path_weight += m
+                path_weight += m * d
 
             print('epoch: {}'.format(epoch))
-            print('key: {}'.format(scp[0]))
+            print('epoch: {}'.format(scp[0]))
             print('path: {}'.format([(g.time[g.tail[e]], g.time[g.head[e]]) for e in path]))
             print('path weight: {}'.format(path_weight))
             print('')
@@ -203,6 +238,7 @@ def eskmeans(landmark_sets, feat_scp, centroids, nepoch):
 landmark_file = open('data/landmarks.pkl', 'rb')
 landmarks = pickle.load(landmark_file)
 landmark_file.close()
+min_duration=20
 
 feat_scp_file = open('data/feats/feats_local.scp')
 feat_scp = []
@@ -212,6 +248,9 @@ for line in feat_scp_file:
     feat_scp.append((parts[0], file, int(shift)))
 feat_scp_file.close()
 
+
+
+#TODO remove
 centroids = eskmeans_init(landmarks, feat_scp, 5)
-centroids = eskmeans(landmarks, feat_scp, centroids, 10)
+centroids = eskmeans(landmarks, feat_scp, centroids, 1, min_duration)
 
