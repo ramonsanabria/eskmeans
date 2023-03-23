@@ -1,15 +1,71 @@
 #!/usr/bin/env python3
 
 import collections
+import argparse
 import sys
 import pickle
 import kaldiark
+import data_utils
 import random
 import numpy
 import numpy.linalg
 import scipy.signal as signal
+from tqdm import tqdm
+import eval_utils
+
 
 random.seed(0)
+
+def up_centroids_and_comp_weights(prev_segments, path, g, sums, counts, scp, k_herman):
+
+    path_weight=0
+
+    if(scp in prev_segments):
+        for e in prev_segments[scp]:
+            v = g.feat(e)
+            arg, m = assign_cluster(v, centroids)
+
+            sums[arg] -= v
+            counts[arg] -= 1
+
+
+    for e in path:
+        v = g.feat(e)
+        d = g.duration(e)
+
+        arg, m = assign_cluster(v, centroids)
+
+        if arg > k_herman:
+            arg = k_herman
+        if arg == k_herman:
+            k_herman += 1
+
+
+        sums[arg] += v
+        counts[arg] += 1
+
+        path_weight += m * d
+
+    
+    return sums, counts, path_weight, k_herman
+
+
+
+
+def test_model(g, feat_scp, gt_phone, gt_words):
+    
+    segments = []
+    for i, scp in tqdm(enumerate(feat_scp), total=len(feat_scp)):
+        path = shortest_path(g)
+        path_weight=0
+        segment_i = []
+        for e in path:
+            path_weight += m * d
+            segment_i.append(e[0])
+    eval_utils.get_word_token_scores(gt_phone, gt_words, segments, 0.2)
+
+    return None
+
 
 
 def subsample(feats, n):
@@ -128,6 +184,7 @@ def shortest_path(g):
         arg = -1
         m = float('-inf')
         for e in g.in_edges[v]:
+            #print(g.weight(e))
             cand = d[g.tail[e]] + g.weight(e)
             if cand > m:
                 m = cand
@@ -142,7 +199,6 @@ def shortest_path(g):
     #
     path = []
     v = g.vertices - 1
-    print(d[v])
     while v != 0:
         e = back[v]
         path.append(e)
@@ -188,18 +244,30 @@ def eskmeans_init(landmark_sets, feat_scp, ncentroid):
 
         if k == ncentroid:
             break
-    centroids = numpy.load("./centroids.npy")
     return centroids
 
 
-def eskmeans(landmark_sets, feat_scp, centroids, nepoch, min_duration):
-    for epoch in range(nepoch):
-        sums = numpy.zeros(centroids.shape)
-        counts = numpy.zeros(centroids.shape[0])
+def eskmeans(landmarks, feat_scps, phn_gt, wrd_gt, centroids, nepoch, min_duration):
 
-        for i, scp in enumerate(feat_scp):
-            print(scp)
-            landmarks = landmark_sets[i]
+    
+    
+    feat_scp_dev = feat_scps["dev"]
+    feat_scp_test = feat_scps["test"]
+
+    landmark_dev = landmarks["dev"]
+    landmark_test = landmarks["test"]
+
+    prev_paths = {}
+
+    k_herman = 0
+
+    for epoch in range(nepoch):
+        sums =  numpy.zeros(centroids.shape)
+        counts = numpy.zeros(centroids.shape[0])
+        #print(centroids[:,:5])
+
+        for i, scp in tqdm(enumerate(feat_scp_dev), total=len(feat_scp_dev)):
+            landmarks = landmark_dev[i]
 
             f = open(scp[1], 'rb')
             f.seek(scp[2])
@@ -212,45 +280,44 @@ def eskmeans(landmark_sets, feat_scp, centroids, nepoch, min_duration):
 
             path = shortest_path(g)
 
-            path_weight = 0
+            sums, counts, path_weight, k_herman  = up_centroids_and_comp_weights(prev_paths, path, g, sums, counts, scp, k_herman)
+            
 
-            for e in path:
-                v = g.feat(e)
-                d = g.duration(e)
+            for idx in range(centroids.shape[0]):
+                if counts[idx] > 0:
+                    centroids[idx,:] = sums[idx,:]/counts[idx]
 
-                arg, m = assign_cluster(v, centroids)
-
-                sums[arg] = sums[arg] * (counts[arg] / (counts[arg] + 1)) + v / (counts[arg] + 1)
-                counts[arg] += 1
-                path_weight += m * d
+            prev_paths[scp[0]] = path
 
             print('epoch: {}'.format(epoch))
-            print('epoch: {}'.format(scp[0]))
+            print('sample: {}'.format(scp[0]))
             print('path: {}'.format([(g.time[g.tail[e]], g.time[g.head[e]]) for e in path]))
             print('path weight: {}'.format(path_weight))
             print('')
 
-        centroids = sums
 
     return centroids
 
 
-landmark_file = open('data/landmarks.pkl', 'rb')
-landmarks = pickle.load(landmark_file)
-landmark_file.close()
-min_duration=20
 
-feat_scp_file = open('data/feats/feats_local.scp')
-feat_scp = []
-for line in feat_scp_file:
-    parts = line.strip().split()
-    file, shift = parts[1].split(':')
-    feat_scp.append((parts[0], file, int(shift)))
-feat_scp_file.close()
+parser = argparse.ArgumentParser(description='ESKMeans segmentattion')
+parser.add_argument('--language', dest='lan', type=str,  choices=["buckeye", "mandarin"], help='datraset to use only available [buckeye, dummy]')
+parser.add_argument('--speaker', dest='spk', type=str, help='speaker to train for')
+parser.add_argument('--centroids', dest='n_c', type=int, help='number of centroids to use')
+parser.add_argument('--min_duration', dest='m_d', type=int, help='min duration of segments')
 
+args = parser.parse_args()
 
+language=args.lan
+speaker=args.spk
+n_centroids=args.n_c
+min_duration=args.m_d
+
+landmarks, feats_scps  = data_utils.load_dataset(language, speaker)
 
 #TODO remove
-centroids = eskmeans_init(landmarks, feat_scp, 5)
-centroids = eskmeans(landmarks, feat_scp, centroids, 1, min_duration)
+centroids = eskmeans_init(feat_scps, 10)
+
+numpy.save("/disk/scratch1/ramons/segmentation/code/eskmeans/centroids_100.npy",centroids)
+centroids = eskmeans(landmarks, feats_scps, phn_gt, wrd_gt, centroids, 5, min_duration)
 
