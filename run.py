@@ -9,9 +9,9 @@ import data_utils
 import random
 import numpy
 import numpy.linalg
-import scipy.signal as signal
 from tqdm import tqdm
-import eval_utils
+from eskmeans_init import initialize_clusters
+from pooling import factory_function
 
 
 random.seed(0)
@@ -65,30 +65,6 @@ def test_model(g, feat_scp, gt_phone, gt_words):
     eval_utils.get_word_token_scores(gt_phone, gt_words, segments, 0.2)
 
     return None
-
-
-
-def subsample(feats, n):
-    k = len(feats) / n
-
-    result = []
-    for i in range(n):
-        result.extend(feats[int(k * i)])
-
-    return numpy.array(result)
-
-def subsample_herman(feats, n):
-    feats_t = feats.T
-
-    y_new = signal.resample(feats_t, n, axis=1).flatten("C")
-    #print(y_new)
-    #k = len(feats) / n
-
-    #result = []
-    #for i in range(n):
-    #    result.extend(feats[int(k * i)])
-
-    return numpy.array(y_new)
 
 #TODO matrice this function
 def assign_cluster(v, centroids):
@@ -208,45 +184,6 @@ def shortest_path(g):
     return path
 
 
-def eskmeans_init(landmark_sets, feat_scp, ncentroid):
-    f = open(feat_scp[0][1], 'rb')
-    f.seek(feat_scp[0][2])
-    feats = kaldiark.parse_feat_matrix(f)
-    feat_dim = feats.shape[1]
-    f.close()
-
-    centroids = numpy.zeros((ncentroid, feat_dim * 10))
-    ncentroid_per_scp = int(ncentroid / len(feat_scp)) + 1
-
-    k = 0
-
-    for i, scp in enumerate(feat_scp):
-        landmarks = landmark_sets[i]
-
-        f = open(scp[1], 'rb')
-        f.seek(scp[2])
-        feats = kaldiark.parse_feat_matrix(f)
-        f.close()
-
-        g = build_graph(landmarks)
-        g.feats = feats
-
-        edges = list(range(g.edges))
-        random.shuffle(edges)
-
-
-        for e in edges[:ncentroid_per_scp]:
-            if k == ncentroid:
-                break
-
-            centroids[k] = g.feat(e)
-            k += 1
-
-        if k == ncentroid:
-            break
-    return centroids
-
-
 def eskmeans(landmarks, feat_scps, phn_gt, wrd_gt, centroids, nepoch, min_duration):
 
     
@@ -313,11 +250,20 @@ speaker=args.spk
 n_centroids=args.n_c
 min_duration=args.m_d
 
+#arguments eskmeans
+ncentroids = 815
+min_segments = 0
+max_segments = 6
+pooling_methos = "herman"
+centroid_init = "spread_herman"
+
+pooling_function = factory_function(pooling_methos)
 landmarks, feats_scps  = data_utils.load_dataset(language, speaker)
 
-#TODO remove
-centroids = eskmeans_init(feat_scps, 10)
+clusters = initialize_clusters(landmarks, max_segments, feats_scps, ncentroids, centroid_init, pooling_function) 
+#numpy.save("/disk/scratch1/ramons/segmentation/code/eskmeans/centroids_100.npy",centroids)
+sys.exit()
 
-numpy.save("/disk/scratch1/ramons/segmentation/code/eskmeans/centroids_100.npy",centroids)
-centroids = eskmeans(landmarks, feats_scps, phn_gt, wrd_gt, centroids, 5, min_duration)
+
+landmarks, transcriptions = eskmeans(landmarks, feats_scps, phn_gt, wrd_gt, centroids, 5, min_duration)
 
