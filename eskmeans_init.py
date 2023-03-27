@@ -1,6 +1,9 @@
 import numpy as np
-import kaldiark
+import kaldi_io
+
 import random
+from tqdm import tqdm
+import sys
 
 
 def init_random_hao(landmark_sets, feat_scp, ncentroid):
@@ -41,98 +44,102 @@ def init_random_hao(landmark_sets, feat_scp, ncentroid):
             break
     return centroids
 
-
-#TODO
-def get_durations_and_plandmarks(landmarks_aux, n_landmarks_max):
+def get_durations(landmarks_aux):
+    """
+    Return a list of tuple, where every tuple is the duration and the
+    :param landmarks_aux: list of landmarks (without the 0 landmarks)
+    :return: list of tuple, where every tuple is the duration and the (start, end) landmarks
+    """
     
     landmarks = [0,] + landmarks_aux
 
     N = len(landmarks)
-    durations = -1*np.ones(int(((N - 1)**2 + (N - 1))/2), dtype=int)
+    #durations = -1*np.ones(int(((N - 1)**2 + (N - 1))/2), dtype=int)
+    durations = []
     j = 0
     for t in range(1, N):
         for i in range(t):
             if t - i > N - 1:
-                j += 1
                 continue
-            durations[j] = landmarks[t] - landmarks[i]
-            j += 1
+            durations.append((landmarks[t] - landmarks[i], (landmarks[t], landmarks[i])))
     return durations
 
-#def initialize_segmentation(landmarks_aux, n_landmarks_max):
+def spread_herman(landmarks, feats, n_landmarks_max, pooling_function, ncentroids, feats_format):
 
-def get_segmented_landmark_indices(self, i):
-    """
-    Return a list of tuple, where every tuple is the start (inclusive) and
-    end (exclusive) landmark index for the segmented embeddings.
-    """
-    indices = []
-    j_prev = 0
-    print(self.boundaries)
-    for j in np.where(self.boundaries[i][:self.lengths[i]])[0]:
-        indices.append((j_prev, j + 1))
-        j_prev = j + 1
-    return indices
+    centroids = np.zeros((pooling_function.get_out_feat_dim(), ncentroids))
 
-def spread_herman(landmarks, feats_scps, max_segments, pooling_function, ncentroids):
-
-    feats_scps
-
-    centroids = np.zeors((130, ncentroids))
-
-    #done for Herman Recovery
-    p_boundary_init = 0.1
-    idx_counter = 0
-
-    np.random.seed(5) 
-
-    landmarks_aux = {}
-
-    initial_segments=[]
-
-    for idx, landmark in enumerate(landmarks):
-        #print(landmark[-1])
-
-        durations = get_durations_and_plandmarks(landmark[0], max_segments)
-        N = len(landmark[0])
-
-        boundaries = (np.random.rand(N) < p_boundary_init)
-
-        boundaries[N-1] = True
-        idx_boundaries = list(range(N+1))
-
-        j_prev = 0
-        for j in np.where(idx_boundaries)[0]:
-            initial_segments.append(((j_prev, j + 1), feats_scps[idx]))
-            j_prev = j + 1
-        
-    n_initial_segments = len(initial_segments)
-    
-    #each utterance has different clusters assigned. 
     #we truncate the left over in the end due the mod of the division
-    random.seed(2) 
-    assignment_list = (list(range(ncentroids))*int(np.ceil(float(n_initial_segments)/ncentroids)))[:n_initial_segments]
-    random.shuffle(assignment_list)
+    n_initial_segments = sum([len(value) for value in landmarks.values()])
+    assignments = (list(range(ncentroids))*int(np.ceil(float(n_initial_segments)/ncentroids)))[:n_initial_segments]
+    num_initial_segments_k = np.zeros(ncentroids, dtype=int)
 
-    # compute centroids
-    for k in range(ncentroids + 1):
-        seg_idx_to_k = np.where(assignments == k)[0]
-        for i in seg_idx_to_k:
-            centroids[:,k] += feature_vector/len(seg_idx_to_k)
+    for assignment in assignments:
+        num_initial_segments_k[assignment] += 1
 
+    random.seed(2)
+    random.shuffle(assignments)
+
+    if(feats_format == 'npz'):
+        feats_dict = feats
+    elif(feats_format == 'scp'):
+        feats_dict = kaldi_io.read_mat_scp(feats)
+    else:
+        print("feats_format not supported: "+str(feats_format))
+        sys.exit()
+
+    #maximum amount of landmarks in the dataset
+    lengths = [ len(landmarks[key]) for key in landmarks.keys() ]
+    max_lengths = max(lengths)
+    initial_segments_count = 0
+
+    for utt_id in sorted(feats_dict.keys()):
+
+
+        #landmark_utt = get_durations_and_plandmarks(landmarks[utt_id], n_landmarks_max)
+        #note that we are not considering 0 as a landmark. num_segments = num_landmarks - 1
+        num_segments = len(landmarks[utt_id])
+        durations = get_durations(landmarks[utt_id])
+        p_boundary_init = 1.0
+
+        #replicate boundaries format from herman
+        boundaries = np.zeros((max_lengths), dtype=bool)
+        boundaries[0:num_segments] = (np.random.rand(num_segments) < p_boundary_init)
+        boundaries[num_segments - 1] = True
+
+        mat = feats_dict[utt_id]
+
+        #needed for inside utterance loop
+        j_prev = 0
+        landmarks_aux = [0,] + landmarks[utt_id]
+
+        for j in np.where(boundaries)[0]:
+            start_idx, end_idx = j_prev, j + 1
+
+            start_frame = landmarks_aux[start_idx]
+            end_frame =  landmarks_aux[end_idx]
+
+            embedding = pooling_function.subsample(mat[start_frame:end_frame+1,:])
+            k = assignments[initial_segments_count]
+            centroids[:,k] += embedding/num_initial_segments_k[k]
+
+            initial_segments_count += 1
+            j_prev = j + 1
+    print(centroids.transpose())
+    print(centroids.shape)
+    sys.exit()
     return centroids
 
 def random_herman(landmarks, feats_scps, max_segments, pooling_function):
      print("here we will use initial_segments vecotr as above and assign a cluster ID to each one randomly")
 
 
-def initialize_clusters(landmarks, max_segments, feats_scps, ncentroids, init_technique, pooling_function):
+def initialize_clusters(landmarks, max_segments, feats_scps, ncentroids, init_technique, pooling_function, format):
     
     if(init_technique == "init_hao"):
         return init_random_hao(landmarks, feats_scps, ncentroids)
 
     elif(init_technique == "spread_herman"):
-        return spread_herman(landmarks, feats_scps, max_segments, pooling_function, ncentroids)
+        return spread_herman(landmarks, feats_scps, max_segments, pooling_function, ncentroids, format)
 
     elif(init_technique == "random_herman"):
         return random_herman(landmarks, feats_scps, max_segments, pooling_function)

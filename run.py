@@ -11,7 +11,7 @@ import numpy
 import numpy.linalg
 from tqdm import tqdm
 from eskmeans_init import initialize_clusters
-from pooling import factory_function
+from pooling import PoolingEngine
 
 
 random.seed(0)
@@ -151,7 +151,6 @@ def shortest_path(g):
 
     d[0] = 0
     back[0] = -1
-
     #
     # Assuming that vertices are topologically sorted
     #
@@ -251,19 +250,25 @@ n_centroids=args.n_c
 min_duration=args.m_d
 
 #arguments eskmeans
-ncentroids = 815
+ncentroids = 896
 min_segments = 0
 max_segments = 6
 pooling_methos = "herman"
 centroid_init = "spread_herman"
 
-pooling_function = factory_function(pooling_methos)
-landmarks, feats_scps  = data_utils.load_dataset(language, speaker)
 
-clusters = initialize_clusters(landmarks, max_segments, feats_scps, ncentroids, centroid_init, pooling_function) 
+
+#landmarks_dict, feat_scp_path = data_utils.load_dataset(language, speaker, "npy")
+landmarks_dict, feat_npy = data_utils.load_dataset(language, speaker, "npz")
+
+feat_dim = 13
+
+pooling_function = PoolingEngine(pooling_methos, feature_dim=feat_dim)
+
+clusters = initialize_clusters(landmarks_dict, max_segments, feat_npy, ncentroids, centroid_init, pooling_function,
+                               "npz")
 #numpy.save("/disk/scratch1/ramons/segmentation/code/eskmeans/centroids_100.npy",centroids)
-sys.exit()
 
 
-landmarks, transcriptions = eskmeans(landmarks, feats_scps, phn_gt, wrd_gt, centroids, 5, min_duration)
+#landmarks, transcriptions = eskmeans(landmarks, feats_scps, phn_gt, wrd_gt, centroids, 5, min_duration)
 
