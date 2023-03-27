@@ -126,7 +126,6 @@ def spread_herman(landmarks, feats, n_landmarks_max, pooling_function, ncentroid
             j_prev = j + 1
     print(centroids.transpose())
     print(centroids.shape)
-    sys.exit()
     return centroids
 
 def random_herman(landmarks, feats_scps, max_segments, pooling_function):
