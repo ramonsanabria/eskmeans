@@ -80,22 +80,22 @@ def make_assignments_consecutive(assignments):
             break
     return assignments
 
-
 def spread_herman(landmarks, feats, pooling_function, feats_format, language, speaker_id):
 
     #number of centroids is the 20% of the number of landmarks
     n_ladmarks = sum([len(value) for value in landmarks.values()])
     ncentroids = int(0.2*n_ladmarks)
     centroids = np.zeros((pooling_function.get_out_feat_dim(), ncentroids))
+    num_centroids = np.zeros((pooling_function.get_out_feat_dim(), ncentroids))
 
     #we truncate the left over in the end due the mod of the division
     n_initial_segments = sum([len(value) for value in landmarks.values()])
     assignments = (list(range(ncentroids))*int(np.ceil(float(n_initial_segments)/ncentroids)))[:n_initial_segments]
     #assigments = make_assignments_consecutive(np.asarray(assignments))
-    num_initial_segments_k = np.zeros(len(assignments), dtype=int)
+    den_centroids = np.zeros(len(assignments), dtype=int)
 
     for assignment in assignments:
-        num_initial_segments_k[assignment] += 1
+        den_centroids[assignment] += 1
 
     random.seed(2)
     random.shuffle(assignments)
@@ -142,7 +142,8 @@ def spread_herman(landmarks, feats, pooling_function, feats_format, language, sp
 
             embedding = pooling_function.subsample(mat[start_frame:end_frame+1,:])
             k = assignments[initial_segments_count]
-            centroids[:,k] += embedding/num_initial_segments_k[k]
+            centroids[:,k] += embedding/den_centroids[k]
+            num_centroids[:,k] += embedding
 
             initial_segments_count += 1
             j_prev = j + 1
@@ -173,15 +174,15 @@ def spread_herman(landmarks, feats, pooling_function, feats_format, language, sp
         print("TOTAL DIFF: "+str(np.sum(centroid_kampereral - centroids)))
         sys.exit()
 
-    return centroids, initial_segments
+    return num_centroids, den_centroids, initial_segments
 
 def random_herman(landmarks, feats_scps, max_segments, pooling_function):
      print("here we will use initial_segments vecotr as above and assign a cluster ID to each one randomly")
 
 
-def initialize_clusters(landmarks, max_segments, feats_scps, ncentroids, init_technique, pooling_function, format,
+def initialize_clusters(landmarks, feats_scps, ncentroids, init_technique, pooling_function, format,
                         language, speaker_id):
-    
+
     if(init_technique == "init_hao"):
         return init_random_hao(landmarks, feats_scps, ncentroids)
 

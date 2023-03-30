@@ -20,11 +20,12 @@ ncentroids=args.n_c
 min_duration=args.m_d
 
 #arguments eskmeans
+pooling_method = "herman"
+centroid_init_method = "spread_herman"
 min_segments = 0
 max_segments = 6
-pooling_methos = "herman"
-centroid_init = "spread_herman"
 nepochs = 5
+max_number_centroids = 895
 
 
 #landmarks_dict, feat_scp_path = data_utils.load_dataset(language, speaker, "npy")
@@ -32,23 +33,24 @@ landmarks_dict, feat_npy = data_utils.load_dataset(language, speaker, "npz")
 
 feat_dim = 13
 
-pooling_engine = PoolingEngine(pooling_methos, feature_dim=feat_dim)
+pooling_engine = PoolingEngine(pooling_method, feature_dim=feat_dim)
 
-centroids, initial_segments = initialize_clusters(landmarks_dict,
-                                                  max_segments,
+num_centroids, den_centroids, initial_segments = initialize_clusters(landmarks_dict,
                                                   feat_npy,
                                                   ncentroids,
-                                                  centroid_init,
+                                                  centroid_init_method,
                                                   pooling_engine,
                                                   "npz",
                                                   language,
                                                   speaker)
 
+#segment
 landmarks, transcriptions = eskmeans(landmarks_dict,
                                      dict(feat_npy),
-                                     centroids,
+                                     num_centroid,
+                                     den_centroid,
+                                     max_number_centroids,
                                      nepochs,
-                                     min_duration,
                                      pooling_engine,
                                      initial_segments)
 

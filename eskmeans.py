@@ -7,38 +7,45 @@ import pickle
 import kaldiark
 import collections
 
-def up_centroids_and_comp_weights(prev_segments, path, g, sums, counts, scp, k_herman, centroids):
+def up_centroids_and_comp_weights(prev_segments,
+                                  edges,
+                                  g,
+                                  num_centroids,
+                                  den_centroids):
 
     path_weight=0
 
-    if(scp in prev_segments):
-        for e in prev_segments[scp]:
-            v = g.feat(e)
-            arg, m = assign_cluster(v, centroids)
+    centroids = num_centroids/den_centroids
 
-            sums[arg] -= v
-            counts[arg] -= 1
+    #removing previous segments from the centroid
+    for seg in prev_segments:
+        v = g.feat_s(seg[0],seg[1])
+        arg, _ = assign_cluster(v, centroids)
+
+        num_centroids[arg] -= v
+        den_centroids[arg] -= 1
 
 
-    for e in path:
+    current_number_centroids = centroids.shape[1]
+
+    for e in edges:
         v = g.feat(e)
         d = g.duration(e)
 
-        arg, m = assign_cluster(v, centroids)
+        c, m = assign_cluster(v, centroids)
 
-        if arg > k_herman:
-            arg = k_herman
-        if arg == k_herman:
-            k_herman += 1
+        #if c > max_number_centroids:
+        #    c = max_number_centroids
 
-
-        sums[arg] += v
-        counts[arg] += 1
-
-        path_weight += m * d
+        #if c == max_number_centroids:
+        #max_number_centroids += 1
 
 
-    return sums, counts, path_weight, k_herman
+        num_centroids[arg] += v
+        den_centroids[arg] += 1
+
+
+    return num_centroids, den_centroids
 
 #TODO matrice this function
 def assign_cluster(v, centroids):
@@ -87,11 +94,13 @@ class Graph:
         self.in_edges[v].append(e)
         return e
 
+    def feat_s(self, s, t):
+        return self.pooling_engine.subsample(self.feats[s:t+1])
+
     def feat(self, e):
         s = self.time[self.tail[e]]
         t = self.time[self.head[e]]
-        v = self.pooling_engine.subsample(self.feats[s:t+1])
-        return v
+        return self.pooling_engine.subsample(self.feats[s:t+1])
 
     def weight(self, e):
         v = self.feat(e)
@@ -106,9 +115,9 @@ class Graph:
         if self.duration(e) < self.min_duration:
             d = float('inf')
 
-        _, m = assign_cluster(v, self.centroids)
+        c_id, m = assign_cluster(v, self.centroids)
 
-        return m * d
+        return m * d, c_id
 
     def duration(self, e):
 
@@ -146,55 +155,59 @@ def shortest_path(g):
 
         arg = -1
         m = float('-inf')
-        can_list = []
         for e in g.in_edges[v]:
-            if(v == 8):
-                print(str(d[g.tail[e]])+" + "+str(g.weight(e))+" = "+str(d[g.tail[e]] + g.weight(e))+" duration = "
-                                                                                                     +str(g.duration(
-                    e)))
 
-            cand = d[g.tail[e]] + g.weight(e)
-            can_list.append(cand)
+            w, _ = g.weight(e)
+            cand = d[g.tail[e]] + w
+
             if cand > m:
                 m = cand
                 arg = e
 
         d[v] = m
         back[v] = arg
-
-    sys.exit()
     #
     # Assuming that the last vertex is the final vertex
     # and that 0 is the initial vertex
     #
-    path = []
+    path_e = []
+    state_sequence = []
     nll = 0
 
     v = g.vertices - 1
     while v != 0:
         e = back[v]
-        nll += g.weight(e)
-        path.append(e)
+        w, c = g.weight(e)
+        path_e.append(e)
         v = g.tail[e]
+        state_sequence.append(c)
 
-    path.reverse()
-    path_time = [ (g.time[g.tail[e]], g.time[g.head[e]]) for e in path ]
+    path_e.reverse()
+    state_sequence.reverse()
+    segments = [ (g.time[g.tail[e]], g.time[g.head[e]]) for e in path_e ]
 
-    return path_time, nll
+    return state_sequence, path_e, segments, nll
+
+def eskmeans(landmarks,
+             feats,
+             num_centroids,
+             den_centroids,
+             max_number_centroids,
+             nepoch,
+             pooling_engine,
+             initial_segments):
 
 
-def eskmeans(landmarks, feats, centroids, nepoch, min_duration, pooling_engine, initial_segments):
 
-    inital_segments = dict(sorted(initial_segments.items()))
+    centroids = num_centroids/den_centroids
+
+    prev_segments = dict(sorted(initial_segments.items()))
     feats = dict(sorted(feats.items()))
 
     utt_ids = list(feats.keys())
     utt_idxs = list(range(len(feats)))
 
     for epoch in range(nepoch):
-
-        sums =  centroids
-        counts = numpy.zeros(centroids.shape[0])
 
         #TODO uncomment this after replicating one epoch
         #utt_order = random.shuffle(feat_idxs)
@@ -204,20 +217,21 @@ def eskmeans(landmarks, feats, centroids, nepoch, min_duration, pooling_engine, 
 
             #get utterance id so we can use it to retrive
             utt_id = utt_ids[idx_sample]
-            g = build_graph(landmarks[utt_id], pooling_engine, centroids, feats[utt_id])
-            path, nll = shortest_path(g)
 
-            print(nll)
-            print(path)
+            #expectation: find the best path
+            g = build_graph(landmarks[utt_id], pooling_engine, centroids, feats[utt_id])
+            transcription, edges, segments, nll = shortest_path(g)
+
+            #maximitzation: modfy centroids
+            num_centroids, den_centroids, = up_centroids_and_comp_weights(prev_segments,
+                                                                         edges,
+                                                                         g,
+                                                                         sums,
+                                                                         num_centroids,
+                                                                         den_centroids)
+
+
             sys.exit()
-            sums, counts, path_weight, k_herman  = up_centroids_and_comp_weights(prev_paths,
-                                                                                 path,
-                                                                                 g,
-                                                                                 sums,
-                                                                                 counts,
-                                                                                 idx_utterance,
-                                                                                 k_herman,
-                                                                                 centroids)
 
 
             for idx in range(centroids.shape[0]):
