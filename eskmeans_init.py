@@ -92,7 +92,7 @@ def spread_herman(landmarks, feats, pooling_function, feats_format, language, sp
     n_initial_segments = sum([len(value) for value in landmarks.values()])
     assignments = (list(range(ncentroids))*int(np.ceil(float(n_initial_segments)/ncentroids)))[:n_initial_segments]
     #assigments = make_assignments_consecutive(np.asarray(assignments))
-    den_centroids = np.zeros(len(assignments), dtype=int)
+    den_centroids = np.zeros(ncentroids, dtype=int)
 
     for assignment in assignments:
         den_centroids[assignment] += 1
@@ -138,18 +138,19 @@ def spread_herman(landmarks, feats, pooling_function, feats_format, language, sp
 
             start_frame = landmarks_aux[start_idx]
             end_frame =  landmarks_aux[end_idx]
-            initial_segments[utt_id].append((start_frame, end_frame))
+
 
             embedding = pooling_function.subsample(mat[start_frame:end_frame+1,:])
             k = assignments[initial_segments_count]
             centroids[:,k] += embedding/den_centroids[k]
             num_centroids[:,k] += embedding
 
+            initial_segments[utt_id].append((k, (start_frame, end_frame)))
+
             initial_segments_count += 1
             j_prev = j + 1
 
     centroid_kampereral = np.load('./data/kamperetal_init_centroids/'+language+'/'+speaker_id+'.npy')
-
     centroids = centroids.transpose()
 
     if(np.allclose(centroid_kampereral, centroids, atol=0.001)):
@@ -161,7 +162,9 @@ def spread_herman(landmarks, feats, pooling_function, feats_format, language, sp
 
             if set(initial_segments_kamperetal.keys()) == set(initial_segments.keys()):
                 for key in initial_segments_kamperetal.keys():
-                    if initial_segments_kamperetal[key] != initial_segments[key]:
+
+                    our_initial_segment = [ el[1] for el in initial_segments[key] ]
+                    if initial_segments_kamperetal[key] != our_initial_segment:
                         print(f'The value of key {key} is different in each segmentation')
                         sys.exit()
             else:

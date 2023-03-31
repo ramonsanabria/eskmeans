@@ -13,37 +13,28 @@ def up_centroids_and_comp_weights(prev_segments,
                                   num_centroids,
                                   den_centroids):
 
-    path_weight=0
-
     centroids = num_centroids/den_centroids
+    centroids = centroids.transpose()
 
     #removing previous segments from the centroid
-    for seg in prev_segments:
-        v = g.feat_s(seg[0],seg[1])
-        arg, _ = assign_cluster(v, centroids)
+    all_args = []
+    for arg, segment in prev_segments:
 
-        num_centroids[arg] -= v
+        v = g.feat_s(segment[0],segment[1])
+        all_args.append(arg)
+        num_centroids[:,arg] -= v
         den_centroids[arg] -= 1
-
-
-    current_number_centroids = centroids.shape[1]
 
     for e in edges:
         v = g.feat(e)
-        d = g.duration(e)
+        arg, _ = assign_cluster(v, centroids)
 
-        c, m = assign_cluster(v, centroids)
-
-        #if c > max_number_centroids:
-        #    c = max_number_centroids
-
-        #if c == max_number_centroids:
-        #max_number_centroids += 1
-
-
-        num_centroids[arg] += v
+        num_centroids[:,arg] += v
         den_centroids[arg] += 1
 
+    for idx, den in enumerate(den_centroids):
+        if(den != 0):
+            centroids[idx,:] = num_centroids[:,idx]/den_centroids[idx]
 
     return num_centroids, den_centroids
 
@@ -95,6 +86,7 @@ class Graph:
         return e
 
     def feat_s(self, s, t):
+
         return self.pooling_engine.subsample(self.feats[s:t+1])
 
     def feat(self, e):
@@ -180,7 +172,7 @@ def shortest_path(g):
         w, c = g.weight(e)
         path_e.append(e)
         v = g.tail[e]
-        state_sequence.append(c)
+        state_sequence.append((c,(v, g.head[e])))
 
     path_e.reverse()
     state_sequence.reverse()
@@ -198,8 +190,8 @@ def eskmeans(landmarks,
              initial_segments):
 
 
-
     centroids = num_centroids/den_centroids
+    centroids = centroids.transpose()
 
     prev_segments = dict(sorted(initial_segments.items()))
     feats = dict(sorted(feats.items()))
@@ -222,23 +214,21 @@ def eskmeans(landmarks,
             g = build_graph(landmarks[utt_id], pooling_engine, centroids, feats[utt_id])
             transcription, edges, segments, nll = shortest_path(g)
 
-            #maximitzation: modfy centroids
-            num_centroids, den_centroids, = up_centroids_and_comp_weights(prev_segments,
+            #maximitzation: modify centroids
+            num_centroids, den_centroids, = up_centroids_and_comp_weights(prev_segments[utt_id],
                                                                          edges,
                                                                          g,
-                                                                         sums,
                                                                          num_centroids,
                                                                          den_centroids)
 
+            centroids = num_centroids / den_centroids
 
+            #with open('/disk/scratch1/ramons/myapps/seg/bucktsong_eskmeans_debug/segmentation/tmp.npy', 'rb') as f:
+            #    initial_segments_kamperetal = numpy.load(f)
+            #print("initial_segments_kamperetal")
+            #print(numpy.allclose(initial_segments_kamperetal.transpose(), num_centroids/den_centroids, atol=0.001))
             sys.exit()
 
-
-            for idx in range(centroids.shape[0]):
-                if counts[idx] > 0:
-                    centroids[idx,:] = sums[idx,:]/counts[idx]
-
-            prev_paths[scp[0]] = path
 
             print('epoch: {}'.format(epoch))
             print('sample: {}'.format(idx_utterance))
@@ -247,5 +237,5 @@ def eskmeans(landmarks,
             print('')
 
 
-    return centroids
+    return None
 

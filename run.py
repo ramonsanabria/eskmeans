@@ -47,8 +47,8 @@ num_centroids, den_centroids, initial_segments = initialize_clusters(landmarks_d
 #segment
 landmarks, transcriptions = eskmeans(landmarks_dict,
                                      dict(feat_npy),
-                                     num_centroid,
-                                     den_centroid,
+                                     num_centroids,
+                                     den_centroids,
                                      max_number_centroids,
                                      nepochs,
                                      pooling_engine,
