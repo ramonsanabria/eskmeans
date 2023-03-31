@@ -199,6 +199,8 @@ def eskmeans(landmarks,
     utt_ids = list(feats.keys())
     utt_idxs = list(range(len(feats)))
 
+    nll_epoch = 0
+
     for epoch in range(nepoch):
 
         #TODO uncomment this after replicating one epoch
@@ -213,6 +215,7 @@ def eskmeans(landmarks,
             #expectation: find the best path
             g = build_graph(landmarks[utt_id], pooling_engine, centroids, feats[utt_id])
             transcription, edges, segments, nll = shortest_path(g)
+            nll_epoch += nll
 
             #maximitzation: modify centroids
             num_centroids, den_centroids, = up_centroids_and_comp_weights(prev_segments[utt_id],
@@ -223,19 +226,11 @@ def eskmeans(landmarks,
 
             centroids = num_centroids / den_centroids
 
-            #with open('/disk/scratch1/ramons/myapps/seg/bucktsong_eskmeans_debug/segmentation/tmp.npy', 'rb') as f:
-            #    initial_segments_kamperetal = numpy.load(f)
-            #print("initial_segments_kamperetal")
-            #print(numpy.allclose(initial_segments_kamperetal.transpose(), num_centroids/den_centroids, atol=0.001))
-            sys.exit()
 
-
-            print('epoch: {}'.format(epoch))
-            print('sample: {}'.format(idx_utterance))
-            print('path: {}'.format([(g.time[g.tail[e]], g.time[g.head[e]]) for e in path]))
-            print('path weight: {}'.format(path_weight))
-            print('')
-
+        print('epoch: {}'.format(epoch))
+        print('nll: {}'.format(nll_epoch))
+        print('')
+        sys.exit()
 
     return None
 

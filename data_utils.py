@@ -2,6 +2,44 @@ import os
 import sys
 import pickle
 import numpy as np
+import pathlib
+import path
+from collections import defaultdict
+
+def write_ramons(unsup_landmarks, unsup_transcript, dataset, speaker_id):
+
+    pathlib.Path(path.join("./results",dataset)).mkdir(parents=True, exist_ok=True)
+    #get classes
+    class_dict= defaultdict(list)
+    print("WRITING RESULTS AT: "+str(path.join("./results",dataset)))
+
+    all_names = ["_".join(el.split("_")[:-1]) for el in unsup_transcript.keys()]
+    #if(len(set(all_names)) > 1):
+    #    print("ERROR: we are processing more than one speaker "+str(set(all_names)))
+    #    sys.exit()
+
+
+    for key in unsup_transcript.keys():
+        for idx, class_id in enumerate(unsup_transcript[key]):
+            start = float(key.split("_")[-1].split("-")[0])/100
+            new_key = "_".join(key.split("_")[:-1])
+
+            final_start = start+float(unsup_landmarks[key][idx][0]/100)
+            final_end = start+float(unsup_landmarks[key][idx][1]/100)
+            if(final_start == 193.31):
+                print(key)
+                print(unsup_landmarks[key][idx])
+
+            class_dict[class_id].append((final_start,final_end,new_key))
+
+    with open(os.path.join("./results",dataset,speaker_id+".tdev"), "w") as result_file:
+        for class_id in class_dict.keys():
+            result_file.write("Class "+str(class_id)+"\n")
+            for segment in class_dict[class_id]:
+                result_file.write(str(segment[2])+" "+str(segment[0])+" "+str(segment[1])+"\n")
+            result_file.write("\n")
+
+
 
 
 #TODO sanity check dataset
