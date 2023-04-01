@@ -1,56 +1,8 @@
-import random
-import numpy
+import numpy as np
 import numpy.linalg
 from tqdm import tqdm
 import sys
-import pickle
-import kaldiark
 import collections
-
-def up_centroids_and_comp_weights(prev_segments,
-                                  edges,
-                                  g,
-                                  num_centroids,
-                                  den_centroids):
-
-    centroids = num_centroids/den_centroids
-    centroids = centroids.transpose()
-
-    #removing previous segments from the centroid
-    all_args = []
-    for arg, segment in prev_segments:
-
-        v = g.feat_s(segment[0],segment[1])
-        all_args.append(arg)
-        num_centroids[:,arg] -= v
-        den_centroids[arg] -= 1
-
-    for e in edges:
-        v = g.feat(e)
-        arg, _ = assign_cluster(v, centroids)
-
-        num_centroids[:,arg] += v
-        den_centroids[arg] += 1
-
-    for idx, den in enumerate(den_centroids):
-        if(den != 0):
-            centroids[idx,:] = num_centroids[:,idx]/den_centroids[idx]
-
-    return num_centroids, den_centroids
-
-#TODO matrice this function
-def assign_cluster(v, centroids):
-    m = float('-inf')
-    arg = -1
-    for i, u in enumerate(centroids):
-        cand = numpy.linalg.norm(u - v)
-        cand = -cand * cand
-
-        if cand > m:
-            m = cand
-            arg = i
-
-    return arg, m
 
 
 class Graph:
@@ -85,6 +37,20 @@ class Graph:
         self.in_edges[v].append(e)
         return e
 
+    def _assign_cluster(self, v, centroids):
+        m = float('-inf')
+        arg = -1
+        for i, u in enumerate(centroids):
+
+            cand = np.linalg.norm(u - v)
+            cand = -cand * cand
+
+            if cand > m:
+                m = cand
+                arg = i
+
+        return arg, m
+
     def feat_s(self, s, t):
 
         return self.pooling_engine.subsample(self.feats[s:t+1])
@@ -104,10 +70,18 @@ class Graph:
         if num_edges < self.min_edges or num_edges > self.max_edges:
             d = float('inf')
 
-        if self.duration(e) < self.min_duration:
+        if d < self.min_duration:
             d = float('inf')
 
-        c_id, m = assign_cluster(v, self.centroids)
+        c_id, m = self._assign_cluster(v, self.centroids)
+
+        # if(c_id == 38):
+        #     #print()
+        #     print("centroid: "+str(self.centroids[38,:][:10]))
+        #     print("segment: "+str(v_aux[:10]))
+        #
+        if(m == 0.0 and d == float('inf')):
+             return -float('inf'), c_id
 
         return m * d, c_id
 
@@ -119,6 +93,7 @@ class Graph:
         return h-t
 
 def build_graph(landmarks, pooling_engine, centroids, feats):
+
     g = Graph(pooling_engine, centroids, feats)
     r = g.add_vertex()
     g.time[r] = 0
@@ -176,22 +151,19 @@ def shortest_path(g):
 
     path_e.reverse()
     state_sequence.reverse()
-    segments = [ (g.time[g.tail[e]], g.time[g.head[e]]) for e in path_e ]
+    segments = [ (state_sequence[idx], (g.time[g.tail[e]], g.time[g.head[e]])) for idx, e in enumerate(path_e) ]
 
-    return state_sequence, path_e, segments, nll
+    return path_e, segments, nll
 
 def eskmeans(landmarks,
              feats,
-             num_centroids,
-             den_centroids,
-             max_number_centroids,
+             centroids,
              nepoch,
              pooling_engine,
-             initial_segments):
+             initial_segments,
+             language,
+             speaker):
 
-
-    centroids = num_centroids/den_centroids
-    centroids = centroids.transpose()
 
     prev_segments = dict(sorted(initial_segments.items()))
     feats = dict(sorted(feats.items()))
@@ -199,13 +171,13 @@ def eskmeans(landmarks,
     utt_ids = list(feats.keys())
     utt_idxs = list(range(len(feats)))
 
-    nll_epoch = 0
 
     for epoch in range(nepoch):
 
         #TODO uncomment this after replicating one epoch
         #utt_order = random.shuffle(feat_idxs)
         utt_order = utt_idxs
+        nll_epoch = 0
 
         for idx_sample in tqdm(utt_order):
 
@@ -213,24 +185,36 @@ def eskmeans(landmarks,
             utt_id = utt_ids[idx_sample]
 
             #expectation: find the best path
-            g = build_graph(landmarks[utt_id], pooling_engine, centroids, feats[utt_id])
-            transcription, edges, segments, nll = shortest_path(g)
+            #if(utt_id == "C19_031956-032684"):
+            # print("pre: "+str(den_centroids[38]))
+
+            g = build_graph(landmarks[utt_id],
+                            pooling_engine,
+                            centroids.get_centroids(),
+                            feats[utt_id])
+
+            edges, segments, nll = shortest_path(g)
             nll_epoch += nll
 
             #maximitzation: modify centroids
-            num_centroids, den_centroids, = up_centroids_and_comp_weights(prev_segments[utt_id],
-                                                                         edges,
-                                                                         g,
-                                                                         num_centroids,
-                                                                         den_centroids)
-
-            centroids = num_centroids / den_centroids
+            centroids.up_centroids_and_comp_weights(prev_segments[utt_id],
+                                                    edges,
+                                                    g)
 
 
-        print('epoch: {}'.format(epoch))
-        print('nll: {}'.format(nll_epoch))
-        print('')
+            prev_segments[utt_id] = segments
+
+        centroids_kampereral = np.load('./data/kamperetal_epochs_centroid/' + language + '/' + speaker + '_'+str(
+            epoch)+'.npy')
+        print(centroids_kampereral.shape)
+        print(centroids.get_centroids().shape)
         sys.exit()
 
-    return None
+        centroids = centroids.transpose()
+
+        if (np.allclose(centroid_kampereral, centroids, atol=0.001)):
+            print("TEST PASSED: CENTROIDS EPOCH "+str(epoch)+" ARE THE SAME AS KAMPER ET AL")
+            print("\tTOTAL DIFF: " + str(np.sum(centroid_kampereral - centroids)))
+
+
 

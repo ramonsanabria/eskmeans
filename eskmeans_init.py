@@ -142,6 +142,7 @@ def spread_herman(landmarks, feats, pooling_function, feats_format, language, sp
 
             embedding = pooling_function.subsample(mat[start_frame:end_frame+1,:])
             k = assignments[initial_segments_count]
+
             centroids[:,k] += embedding/den_centroids[k]
             num_centroids[:,k] += embedding
 
@@ -154,7 +155,7 @@ def spread_herman(landmarks, feats, pooling_function, feats_format, language, sp
     centroids = centroids.transpose()
 
     if(np.allclose(centroid_kampereral, centroids, atol=0.001)):
-        print("TEST PASSED: CENTROIDS ARE THE SAME AS KAMPER ET AL")
+        print("TEST PASSED: INITIAL CENTROIDS ARE THE SAME AS KAMPER ET AL")
         print("\tTOTAL DIFF: "+str(np.sum(centroid_kampereral - centroids)))
 
         with open('./data/kamperetal_init_centroids/'+language+'/'+speaker_id+'_init_segs.pkl', 'rb') as f:

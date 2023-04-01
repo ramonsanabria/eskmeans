@@ -3,15 +3,14 @@ import sys
 import pickle
 import numpy as np
 import pathlib
-import path
 from collections import defaultdict
 
 def write_ramons(unsup_landmarks, unsup_transcript, dataset, speaker_id):
 
-    pathlib.Path(path.join("./results",dataset)).mkdir(parents=True, exist_ok=True)
+    pathlib.Path(os.path.join("./results",dataset)).mkdir(parents=True, exist_ok=True)
     #get classes
     class_dict= defaultdict(list)
-    print("WRITING RESULTS AT: "+str(path.join("./results",dataset)))
+    print("WRITING RESULTS AT: "+str(os.path.join("./results",dataset)))
 
     all_names = ["_".join(el.split("_")[:-1]) for el in unsup_transcript.keys()]
     #if(len(set(all_names)) > 1):

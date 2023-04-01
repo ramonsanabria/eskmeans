@@ -5,7 +5,9 @@ import data_utils
 from eskmeans_init import initialize_clusters
 from pooling import PoolingEngine
 from eskmeans import eskmeans
-import os
+import sys
+from centroids import Centroids
+
 
 parser = argparse.ArgumentParser(description='ESKMeans segmentattion')
 parser.add_argument('--language', dest='lan', type=str,  choices=["buckeye", "mandarin"], help='datraset to use only available [buckeye, dummy]')
@@ -53,19 +55,24 @@ num_centroids, den_centroids, initial_segments = initialize_clusters(landmarks_d
                                                   language,
                                                   speaker)
 
+
+#create centroid object
+centroids = Centroids(num_centroids, den_centroids)
+
 #segment
 landmarks, transcriptions = eskmeans(landmarks_dict,
                                      dict(feat_npy),
-                                     num_centroids,
-                                     den_centroids,
-                                     max_number_centroids,
+                                     centroids,
                                      nepochs,
                                      pooling_engine,
-                                     initial_segments)
+                                     initial_segments,
+                                     language,
+                                     speaker)
 
 #save results
-result_folder = os.path.join("results", feature_type+"_"+pooling_method)
-data_utils.write_ramons(landmarks, transcriptions, language, speaker, result_folder)
+#result_folder = os.path.join("results", feature_type+"_"+pooling_method)
+#pathlib.Path(result_folder).mkdir(parents=True, exist_ok=True)
+#data_utils.write_ramons(landmarks, transcriptions, language, speaker, result_folder)
 
 
 
