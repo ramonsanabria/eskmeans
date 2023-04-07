@@ -1,8 +1,9 @@
-import numpy
+import numpy as np
+import sys
 
 class Centroids:
 
-    def __init__(self, num_centroids, den_centroids):
+    def __init__(self, num_centroids, den_centroids, language, speaker_id, centroids_rand):
         """
         Constructor for the Centroids class.
 
@@ -10,11 +11,19 @@ class Centroids:
             num_centroids (numpy.ndarray): The numerator of the centroids.
             den_centroids (numpy.ndarray): The denominator of the centroids.
         """
-        self.__num_centroids = num_centroids
-        self.__den_centroids = den_centroids
 
-        #rules for reassigment of centroids
-        self.rules = []
+        #private object
+        self.__num_centroids = num_centroids
+        self.den_centroids = den_centroids
+        self.__centroids = self.__num_centroids / self.den_centroids
+
+        self.__centroids_rand = centroids_rand
+
+        #rules to reorder previous segments
+        self.__rules_previous_segments = []
+
+        #keep tracking of randomly sampled centroids
+        self.__non_randomly_initialized_centroids = den_centroids.shape[0]
 
     #TODO matrice this function
     def __assign_cluster(self, v, centroids):
@@ -22,7 +31,7 @@ class Centroids:
         arg = -1
         for i, u in enumerate(centroids):
 
-            cand = numpy.linalg.norm(u - v)
+            cand = np.linalg.norm(u - v)
             cand = -cand * cand
 
             if cand > m:
@@ -34,7 +43,8 @@ class Centroids:
     def up_centroids_and_comp_weights(self,
                                       prev_segments,
                                       edges,
-                                      g):
+                                      g,
+                                      epoch):
         """
         Updates the centroids and the components weights.
         :param prev_segments: The segments assigned to that utterance in the previous iteration
@@ -43,49 +53,93 @@ class Centroids:
         :return:
         """
 
-        centroids = self.__num_centroids / self.__den_centroids
-        centroids = centroids.transpose()
-        idx_last_component = self.__den_centroids.shape[0] - 1
-
         #removing previous segments from the centroid
         all_args = []
-        for arg, segment in prev_segments:
+        new_rules = []
 
-            #reassigning the centroid (if some centroid has been removed)
-            for rule in self.rules:
-                if(rule[0] == arg):
-                    arg = rule[1]
+        #print("deleting segments: "+str([el[0] for el in prev_segments]))
+        for arg, segment in prev_segments:
+            #C19_041232-041902
+
+            #chage segment ids according to the rules
+            #for rule in self.__rules_previous_segments:
+            #    if(rule[0] == arg):
+            #        print("applying rule:"+str(rule))
+            #        arg = rule[1]
+
+            #if(arg == 231):
+            #    print("PRE del k:"+str(arg)+" count: "+str(self.den_centroids[arg]))
 
             v = g.feat_s(segment[0],segment[1])
             all_args.append(arg)
             self.__num_centroids[:, arg] -= v
-            self.__den_centroids[arg] -= 1
+            self.den_centroids[arg] -= 1
 
+
+        #we incorporate the new segments into the centroids
+        #we need to recompute component so we can incorporate them into centroids
+        #we do not apply rules here (rearranging segments do not effect current components)
+        current=[]
         for e in edges:
+
             v = g.feat(e)
-            arg, _ = self.__assign_cluster(v, centroids)
+            arg, _ = self.__assign_cluster(v, self.__centroids.transpose())
+
+            current.append(arg)
+
+            if(arg > self.__non_randomly_initialized_centroids):
+                arg = self.__non_randomly_initialized_centroids
+
+            if(arg == self.__non_randomly_initialized_centroids):
+                self.__non_randomly_initialized_centroids += 1
 
             self.__num_centroids[:, arg] += v
-            self.__den_centroids[arg] += 1
+            self.den_centroids[arg] += 1
 
-        #removing centroids without components
-        if numpy.any(numpy.equal(self.__den_centroids, 0)):
-            for idx_den_zero in numpy.where(self.__den_centroids == 0)[0][::-1]:
 
-                #we substitue the empty centroid with the last centroid
-                if(idx_last_component != idx_den_zero):
-                    self.__num_centroids[:, idx_den_zero] = self.__num_centroids[:, idx_last_component]
-                    self.__den_centroids[idx_den_zero] = self.__den_centroids[idx_last_component]
-                    self.rules.append((idx_last_component,idx_den_zero))
+        for idx_den_zero in np.where(self.den_centroids[:self.__non_randomly_initialized_centroids] == 0)[0][::-1]:
 
-                #we remove the last centroid
-                self.__num_centroids = numpy.delete(self.__num_centroids, idx_last_component, axis=1)
-                self.__den_centroids = numpy.delete(self.__den_centroids, idx_last_component, axis=0)
+            #we track which element is substitued
+            self.__non_randomly_initialized_centroids -= 1
+
+            #we substitue the empty centroid with the last centroid
+            if(self.__non_randomly_initialized_centroids != idx_den_zero):
+
+                self.__num_centroids[:, idx_den_zero] = self.__num_centroids[:, self.__non_randomly_initialized_centroids]
+                self.den_centroids[idx_den_zero] = self.den_centroids[self.__non_randomly_initialized_centroids]
+
+                self.__centroids[:,self.__non_randomly_initialized_centroids] = \
+                    self.__centroids_rand[:,self.__non_randomly_initialized_centroids]
+
+                self.__rules_previous_segments.append((self.__non_randomly_initialized_centroids, idx_den_zero))
+                new_rules.append((self.__non_randomly_initialized_centroids, idx_den_zero))
+
+        #we remove the last centroid(s)
+        self.__centroids[:,:self.__non_randomly_initialized_centroids] = \
+            self.__num_centroids[:,:self.__non_randomly_initialized_centroids]/ \
+            self.den_centroids[:self.__non_randomly_initialized_centroids]
+
+        #set them to zero and prepare for recieving a new component
+        self.__num_centroids[:, self.__non_randomly_initialized_centroids:] = 0
+        self.den_centroids[self.__non_randomly_initialized_centroids:] = 0
+
+        #return the only the new rules (otherwise new rules will be empty)
+        return new_rules
+
+    def get_final_centroids(self):
+
+        return self.__centroids.transpose()[:self.__non_randomly_initialized_centroids,:]
 
     def get_centroids(self):
         """
         Returns the centroids.
         :return (numpy.ndarray): The centroids.
         """
-        centroids = self.__num_centroids / self.__den_centroids
-        return centroids.transpose()
+        return self.__centroids.transpose()
+
+    def reset_rules_for_previous_segment(self):
+        """
+        Resets the rules -- this is excuted at end of every epoch
+        """
+
+        self.__rules_previous_segments = []

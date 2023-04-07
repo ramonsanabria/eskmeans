@@ -91,6 +91,7 @@ def spread_herman(landmarks, feats, pooling_function, feats_format, language, sp
     #we truncate the left over in the end due the mod of the division
     n_initial_segments = sum([len(value) for value in landmarks.values()])
     assignments = (list(range(ncentroids))*int(np.ceil(float(n_initial_segments)/ncentroids)))[:n_initial_segments]
+
     #assigments = make_assignments_consecutive(np.asarray(assignments))
     den_centroids = np.zeros(ncentroids, dtype=int)
 
@@ -155,10 +156,10 @@ def spread_herman(landmarks, feats, pooling_function, feats_format, language, sp
     centroids = centroids.transpose()
 
     if(np.allclose(centroid_kampereral, centroids, atol=0.001)):
-        print("TEST PASSED: INITIAL CENTROIDS ARE THE SAME AS KAMPER ET AL")
+        print("UNIT TEST PASSED: INITIAL CENTROIDS ARE THE SAME AS KAMPER ET AL")
         print("\tTOTAL DIFF: "+str(np.sum(centroid_kampereral - centroids)))
 
-        with open('./data/kamperetal_init_centroids/'+language+'/'+speaker_id+'_init_segs.pkl', 'rb') as f:
+        with open('./data/kamperetal_init_segments/'+language+'/'+speaker_id+'_init_segs.pkl', 'rb') as f:
             initial_segments_kamperetal = pickle.load(f)
 
             if set(initial_segments_kamperetal.keys()) == set(initial_segments.keys()):
@@ -169,13 +170,12 @@ def spread_herman(landmarks, feats, pooling_function, feats_format, language, sp
                         print(f'The value of key {key} is different in each segmentation')
                         sys.exit()
             else:
-                print("KEYS IN INITIAL SEGMENTATION ARE NOT THE SAME")
+                print("UNIT TEST FAILED: KEYS IN INITIAL SEGMENTATION ARE NOT THE SAME")
                 sys.exit()
-
-            print("TEST PASSED: INITIAL SEGMENTATION IS THE SAME AS KAMPER ET AL")
+            print("UNIT TEST PASSED: INITIAL SEGMENTATION IS THE SAME AS KAMPER ET AL")
     else:
-        print("TEST FAILED: CENTROIDS ARE NOT THE SAME AS KAMPER ET AL")
-        print("TOTAL DIFF: "+str(np.sum(centroid_kampereral - centroids)))
+        print("UNIT TEST FAILED: CENTROIDS ARE NOT THE SAME AS KAMPER ET AL")
+        print("\tTOTAL DIFF: "+str(np.sum(centroid_kampereral - centroids)))
         sys.exit()
 
     return num_centroids, den_centroids, initial_segments
@@ -184,12 +184,38 @@ def random_herman(landmarks, feats_scps, max_segments, pooling_function):
      print("here we will use initial_segments vecotr as above and assign a cluster ID to each one randomly")
 
 
-def initialize_clusters(landmarks, feats_scps, ncentroids, init_technique, pooling_function, format,
-                        language, speaker_id):
+def initialize_clusters(landmarks,
+                        feats_scps,
+                        ncentroids,
+                        init_technique,
+                        init_centroids_technique,
+                        pooling_function,
+                        format,
+                        language,
+                        speaker_id):
 
     if(init_technique == "init_hao"):
-        return init_random_hao(landmarks, feats_scps, ncentroids)
+        num_centroids, den_centroids, initial_segments = init_random_hao(landmarks, feats_scps, ncentroids)
 
     elif(init_technique == "spread_herman"):
-        return spread_herman(landmarks, feats_scps, pooling_function, format, language,
-                             speaker_id)
+        num_centroids, den_centroids, initial_segments = spread_herman(landmarks,
+                                                                        feats_scps,
+                                                                        pooling_function,
+                                                                        format,
+                                                                        language,
+                                                                        speaker_id)
+    else:
+        print("init_technique (cluster initialization) not supported: "+str(init_technique))
+        sys.exit()
+
+    if(init_centroids_technique == "herman"):
+
+        centroid_rands = np.load("./data/kamperetal_init_centroids/"
+                                 +language+"/"+speaker_id
+                                 +"_rand.npy").transpose()
+    else:
+
+        print("init_centroid_technique (initialitzation of clusters) not supported: "+str(init_technique))
+        sys.exit()
+
+    return num_centroids, den_centroids, initial_segments, centroid_rands

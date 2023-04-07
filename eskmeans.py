@@ -1,9 +1,12 @@
+import pickle
+
 import numpy as np
 import numpy.linalg
 from tqdm import tqdm
 import sys
 import collections
-
+from collections import defaultdict
+import os
 
 class Graph:
     def __init__(self, pooling_engine, centroids, feats):
@@ -75,11 +78,6 @@ class Graph:
 
         c_id, m = self._assign_cluster(v, self.centroids)
 
-        # if(c_id == 38):
-        #     #print()
-        #     print("centroid: "+str(self.centroids[38,:][:10]))
-        #     print("segment: "+str(v_aux[:10]))
-        #
         if(m == 0.0 and d == float('inf')):
              return -float('inf'), c_id
 
@@ -105,6 +103,7 @@ def build_graph(landmarks, pooling_engine, centroids, feats):
     for u in range(g.vertices):
         for v in range(u + 1, g.vertices):
             g.add_edge(u, v)
+
 
     return g
 
@@ -149,11 +148,95 @@ def shortest_path(g):
         v = g.tail[e]
         state_sequence.append((c,(v, g.head[e])))
 
+        nll += w
+
     path_e.reverse()
     state_sequence.reverse()
-    segments = [ (state_sequence[idx], (g.time[g.tail[e]], g.time[g.head[e]])) for idx, e in enumerate(path_e) ]
+
+
+    segments = [ (c_id, (g.time[edge[0]], g.time[edge[1]])) for c_id, edge in state_sequence ]
 
     return path_e, segments, nll
+
+
+def update_previous_segments(prev_segments, rules):
+
+    #substitute the cluster id for the corresponding one
+    for utt_id in prev_segments.keys():
+        aux_list = []
+        for c_id, segment in prev_segments[utt_id]:
+            for rule in rules:
+                if rule[0] == c_id:
+                    aux_list.append((rule[1], segment))
+                else:
+                    aux_list.append((c_id, segment))
+        prev_segments[utt_id] = aux_list
+
+    return prev_segments
+
+def unit_test_segments_and_transcriptions(segments_and_transcipts_ours, language, speaker, epoch):
+
+        with open(os.path.join('./data/kamperetal_segmentation/',
+                                language,
+                               "epoch_"+str(epoch),
+                               speaker+'.pkl'),"rb") as f:
+            segments_kamper_etal = pickle.load(f)
+
+        for key, kamper_segment in segments_kamper_etal.items():
+            our_segment =  [el[1]for el in segments_and_transcipts_ours[key]]
+            our_segment = sorted(our_segment)
+            kamper_segment = sorted(kamper_segment)
+
+            if (our_segment != kamper_segment):
+                print("UNIT TEST FAILED: SEGMENTS IN  EPOCH "+str(epoch)+" FROM UTT "+key+" ARE DIFFERENT AS KAMPER ET AL")
+                sys.exit()
+
+        print("UNIT TEST PASSED: SEGMENTS IN  EPOCH "+str(epoch)+" ARE THE SAME AS KAMPER ET AL")
+
+        with open(os.path.join('./data/kamperetal_transcripts/',
+                               language,
+                               "epoch_"+str(epoch),
+                               speaker+'.pkl'),"rb") as f:
+            transcripts_kamper_etal = pickle.load(f)
+
+        for key, kamper_transcripts in transcripts_kamper_etal.items():
+            our_transcripts =  [el[0]for el in segments_and_transcipts_ours[key]]
+            if(our_transcripts != kamper_transcripts):
+                print(our_transcripts)
+                print(kamper_transcripts)
+                print("UNIT TEST FAILED: TRANSCRIPTS IN  EPOCH "+str(epoch)+" FROM UTT "+key+" ARE DIFFERENT AS KAMPER ET AL")
+                sys.exit()
+
+        print("UNIT TEST PASSED: TRANSCRIPTS IN  EPOCH "+str(epoch)+" ARE THE SAME AS KAMPER ET AL")
+
+
+def unit_test_centroids(centroids_ours, language, speaker, epoch):
+
+    centroids_kamperetal = np.load(os.path.join('./data/kamperetal_epochs_centroids/',
+                                                language,
+                                                "epoch_"+str(epoch),
+                                                speaker+'.npy'))
+
+    if (np.allclose(centroids_kamperetal, centroids_ours, atol=0.001)):
+        print("UNIT TEST PASSED: CENTROIDS EPOCH "+str(epoch)+" ARE THE SAME AS KAMPER ET AL")
+        print("\tTOTAL DIFF: " + str(np.sum(centroids_kamperetal - centroids_ours)))
+    else:
+        print("UNIT FAILED: CENTROIDS EPOCH "+str(epoch)+" ARE DIFFERENT AS KAMPER ET AL")
+        print("\tTOTAL DIFF: " + str(np.sum(centroids_kamperetal - centroids_ours)))
+        sys.exit()
+
+
+def convert_to_segments_and_transcriptions(segments_and_transcriptioss):
+    transcriptions = defaultdict(list)
+    segments = defaultdict(list)
+
+    for utt_id in segments_and_transcriptioss.keys():
+        transcriptions[utt_id] = [el[0] for el in segments_and_transcriptioss[utt_id]]
+        segments[utt_id] = [el[1] for el in segments_and_transcriptioss[utt_id]]
+
+    return transcriptions, segments
+
+
 
 def eskmeans(landmarks,
              feats,
@@ -174,47 +257,48 @@ def eskmeans(landmarks,
 
     for epoch in range(nepoch):
 
+        print("ITERATION: ", epoch)
         #TODO uncomment this after replicating one epoch
         #utt_order = random.shuffle(feat_idxs)
         utt_order = utt_idxs
+
         nll_epoch = 0
 
+        #reset rules for centroid exchnage
+        centroids.reset_rules_for_previous_segment()
+
+        #for idx_sample in tqdm(utt_order):
         for idx_sample in tqdm(utt_order):
 
             #get utterance id so we can use it to retrive
             utt_id = utt_ids[idx_sample]
 
-            #expectation: find the best path
-            #if(utt_id == "C19_031956-032684"):
-            # print("pre: "+str(den_centroids[38]))
-
+            #expectation: compute shortest path
             g = build_graph(landmarks[utt_id],
                             pooling_engine,
                             centroids.get_centroids(),
                             feats[utt_id])
 
-            edges, segments, nll = shortest_path(g)
+            edges, seg_and_cids, nll = shortest_path(g)
             nll_epoch += nll
 
+
             #maximitzation: modify centroids
-            centroids.up_centroids_and_comp_weights(prev_segments[utt_id],
-                                                    edges,
-                                                    g)
+            #we return segments just in case some reordering is needed
+            rules = centroids.up_centroids_and_comp_weights(
+                            prev_segments[utt_id],
+                            edges,
+                            g,
+                            epoch)
+
+            prev_segments[utt_id] = seg_and_cids
 
 
-            prev_segments[utt_id] = segments
+            #if some reorderings happened in centroids, we update cluster id from previous segments
+            if(len(rules) > 0):
+                prev_segments = update_previous_segments(prev_segments, rules)
 
-        centroids_kampereral = np.load('./data/kamperetal_epochs_centroid/' + language + '/' + speaker + '_'+str(
-            epoch)+'.npy')
-        print(centroids_kampereral.shape)
-        print(centroids.get_centroids().shape)
-        sys.exit()
+        unit_test_segments_and_transcriptions(prev_segments, language, speaker, epoch)
+        unit_test_centroids(centroids.get_final_centroids(), language, speaker, epoch)
 
-        centroids = centroids.transpose()
-
-        if (np.allclose(centroid_kampereral, centroids, atol=0.001)):
-            print("TEST PASSED: CENTROIDS EPOCH "+str(epoch)+" ARE THE SAME AS KAMPER ET AL")
-            print("\tTOTAL DIFF: " + str(np.sum(centroid_kampereral - centroids)))
-
-
-
+    return convert_to_segments_and_transcriptions(prev_segments)

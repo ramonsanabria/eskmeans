@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 
 import argparse
+import pickle
 import data_utils
 from eskmeans_init import initialize_clusters
 from pooling import PoolingEngine
@@ -38,7 +39,7 @@ pooling_method = "herman"
 centroid_init_method = "spread_herman"
 min_segments = 0
 max_segments = 6
-nepochs = 5
+nepochs = 10
 feat_dim = 13
 
 landmarks_dict, feat_npy = data_utils.load_dataset(language, speaker, "npz")
@@ -46,18 +47,18 @@ landmarks_dict, feat_npy = data_utils.load_dataset(language, speaker, "npz")
 pooling_engine = PoolingEngine(pooling_method, feature_dim=feat_dim)
 
 #initialize clustering
-num_centroids, den_centroids, initial_segments = initialize_clusters(landmarks_dict,
-                                                  feat_npy,
-                                                  max_number_centroids,
-                                                  centroid_init_method,
-                                                  pooling_engine,
-                                                  "npz",
-                                                  language,
-                                                  speaker)
-
+num_centroids, den_centroids, initial_segments, centroid_rands = initialize_clusters(landmarks_dict,
+                                                                  feat_npy,
+                                                                  max_number_centroids,
+                                                                  centroid_init_method,
+                                                                  "herman",
+                                                                  pooling_engine,
+                                                                  "npz",
+                                                                  language,
+                                                                  speaker)
 
 #create centroid object
-centroids = Centroids(num_centroids, den_centroids)
+centroids = Centroids(num_centroids, den_centroids, language, speaker, centroid_rands)
 
 #segment
 landmarks, transcriptions = eskmeans(landmarks_dict,
