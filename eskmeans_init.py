@@ -154,32 +154,10 @@ def spread_herman(landmarks, feats, pooling_function, feats_format, language, sp
             initial_segments_count += 1
             j_prev = j + 1
 
-    centroid_kampereral = np.load('./data/kamperetal_init_centroids/'+language+'/'+speaker_id+'.npy')
     centroids = centroids.transpose()
 
     if(unit_test_flag):
-        if(np.allclose(centroid_kampereral, centroids, atol=0.001)):
-            print("UNIT TEST PASSED: INITIAL CENTROIDS ARE THE SAME AS KAMPER ET AL")
-            print("\tTOTAL DIFF: "+str(np.sum(centroid_kampereral - centroids)))
-
-            with open('./data/kamperetal_init_segments/'+language+'/'+speaker_id+'_init_segs.pkl', 'rb') as f:
-                initial_segments_kamperetal = pickle.load(f)
-
-                if set(initial_segments_kamperetal.keys()) == set(initial_segments.keys()):
-                    for key in initial_segments_kamperetal.keys():
-
-                        our_initial_segment = [ el[1] for el in initial_segments[key] ]
-                        if initial_segments_kamperetal[key] != our_initial_segment:
-                            print(f'The value of key {key} is different in each segmentation')
-                            sys.exit()
-                else:
-                    print("UNIT TEST FAILED: KEYS IN INITIAL SEGMENTATION ARE NOT THE SAME")
-                    sys.exit()
-                print("UNIT TEST PASSED: INITIAL SEGMENTATION IS THE SAME AS KAMPER ET AL")
-        else:
-            print("UNIT TEST FAILED: CENTROIDS ARE NOT THE SAME AS KAMPER ET AL")
-            print("\tTOTAL DIFF: "+str(np.sum(centroid_kampereral - centroids)))
-            sys.exit()
+        unit_test.initial_centroids_and_segments(centroids, initial_segments, language, speaker_id)
 
     return num_centroids, den_centroids, initial_segments
 

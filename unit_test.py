@@ -30,6 +30,8 @@ def segments_and_transcriptions(segments_and_transcipts_ours, language, speaker,
 
         if (our_segment != kamper_segment):
             print("UNIT TEST FAILED: SEGMENTS IN  EPOCH "+str(epoch)+" FROM UTT "+key+" ARE DIFFERENT AS KAMPER ET AL")
+            print("OURS: "+str(our_segment))
+            print("KAMPERS: "+str(kamper_segment))
             sys.exit()
 
     print("UNIT TEST PASSED: SEGMENTS IN  EPOCH "+str(epoch)+" ARE THE SAME AS KAMPER ET AL")
@@ -63,4 +65,31 @@ def centroids(centroids_ours, language, speaker, epoch):
     else:
         print("UNIT FAILED: CENTROIDS EPOCH "+str(epoch)+" ARE DIFFERENT AS KAMPER ET AL")
         print("\tTOTAL DIFF: " + str(np.sum(centroids_kamperetal - centroids_ours)))
+        sys.exit()
+
+def initial_centroids_and_segments(centroids, initial_segments, language, speaker_id):
+
+    centroid_kampereral = np.load('./data/kamperetal_init_centroids/'+language+'/'+speaker_id+'.npy')
+
+    if(np.allclose(centroid_kampereral, centroids, atol=0.001)):
+        print("UNIT TEST PASSED: INITIAL CENTROIDS ARE THE SAME AS KAMPER ET AL")
+        print("\tTOTAL DIFF: "+str(np.sum(centroid_kampereral - centroids)))
+
+        with open('./data/kamperetal_init_segments/'+language+'/'+speaker_id+'_init_segs.pkl', 'rb') as f:
+            initial_segments_kamperetal = pickle.load(f)
+
+            if set(initial_segments_kamperetal.keys()) == set(initial_segments.keys()):
+                for key in initial_segments_kamperetal.keys():
+
+                    our_initial_segment = [ el[1] for el in initial_segments[key] ]
+                    if initial_segments_kamperetal[key] != our_initial_segment:
+                        print(f'The value of key {key} is different in each segmentation')
+                        sys.exit()
+            else:
+                print("UNIT TEST FAILED: KEYS IN INITIAL SEGMENTATION ARE NOT THE SAME")
+                sys.exit()
+            print("UNIT TEST PASSED: INITIAL SEGMENTATION IS THE SAME AS KAMPER ET AL")
+    else:
+        print("UNIT TEST FAILED: CENTROIDS ARE NOT THE SAME AS KAMPER ET AL")
+        print("\tTOTAL DIFF: "+str(np.sum(centroid_kampereral - centroids)))
         sys.exit()

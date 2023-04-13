@@ -185,11 +185,15 @@ def update_previous_segments(prev_segments, rules):
     for utt_id in prev_segments.keys():
         aux_list = []
         for c_id, segment in prev_segments[utt_id]:
+            flag_rule = False
             for rule in rules:
                 if rule[0] == c_id:
                     aux_list.append((rule[1], segment))
-                else:
-                    aux_list.append((c_id, segment))
+                    flag_rule = True
+
+            if not flag_rule:
+                aux_list.append((c_id, segment))
+
         prev_segments[utt_id] = aux_list
 
     return prev_segments
@@ -238,8 +242,8 @@ def eskmeans(landmarks,
         #reset rules for centroid exchnage
         centroids.reset_rules_for_previous_segment()
 
-        #for idx_sample in tqdm(utt_order):
-        for idx_sample in utt_order:
+        for idx_sample in tqdm(utt_order):
+        #for idx_sample in utt_order:
 
             #get utterance id so we can use it to retrive
             utt_id = utt_ids[idx_sample]
@@ -260,7 +264,6 @@ def eskmeans(landmarks,
 
             #maximitzation: modify centroids
             #we return segments just in case some reordering is needed
-            #TODO output sge_and_cids according to herman's
             rules, seg_and_cids = centroids.up_centroids_and_comp_weights( prev_segments[utt_id],
                             edges,
                             g,
@@ -272,6 +275,7 @@ def eskmeans(landmarks,
             #if some reorderings happened in centroids, we update cluster id from previous segments
             if(len(rules) > 0):
                 prev_segments = update_previous_segments(prev_segments, rules)
+
 
 
         unit_test.segments_and_transcriptions(prev_segments, language, speaker, epoch)
