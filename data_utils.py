@@ -39,10 +39,8 @@ def write_ramons(unsup_landmarks, unsup_transcript, dataset, speaker_id):
             result_file.write("\n")
 
 
-
-
 #TODO sanity check dataset
-def load_dataset(dataset, speaker, format):
+def load_dataset(dataset, speaker, feature_type, layer=10, vad="prevad"):
 
     main_path = os.path.join("/disk/scratch1/ramons/data/zerospeech_seg/mfcc_herman/",dataset,speaker)
 
@@ -55,31 +53,31 @@ def load_dataset(dataset, speaker, format):
         landmarks_aux[key] = landmark[key]
     landmarks_dict = landmarks_aux
 
-    if(format == "npz"):
+    if(feature_type == "mfcc"):
         feat_np = np.load(os.path.join(main_path, 'raw_mfcc.npz'))
         return landmarks_dict, feat_np
-    elif(format == "scp"):
-        feat_scp_path = os.path.join(main_path, 'raw_mfcc.scp')
-        return landmarks_dict, feat_scp_path
+
+    elif("hubert" in feature_type):
+
+        mfcc_herman_ids = sorted(list(np.load(os.path.join(main_path, 'raw_mfcc.npz')).keys()))
+
+        main_path = os.path.join("/disk/scratch1/ramons/data/hubert_data/seg/zsc/",
+                                 feature_type,str(layer),
+                                 "norm",
+                                 dataset,
+                                 "postvad")
+
+        feat_np = np.load(os.path.join(main_path, speaker+"_features_frame.npz"))
+
+        if(sorted(list(feat_np.keys())) != mfcc_herman_ids):
+            print("the IDs (name and numbers) of the vad are NOT the same as in herman's mfccs")
+            print(sorted(list(feat_np.keys())))
+            print(mfcc_herman_ids)
+            sys.exit()
+        else:
+            print("the IDs (name and numbers) of the vad are the same as in herman's mfccs")
+
+        return landmarks_dict, feat_np
     else:
         print("format not supported")
         sys.exit()
-    #feat_scp_file = open(os.path.join(main_path, 'raw_mfcc.scp'))
-
-    #feat_scp_dict={}
-    #for line in feat_scp_file.readlines():
-    #    feat_scp_dict[line.split()[0]] = line.strip()
-
-    # feat_scp = []
-
-    # for key in sorted(feat_scp_dict):
-    #
-    #     parts_scp = feat_scp_dict[key].split()
-    #     utt_id = parts_scp[0]
-    #     file, shift = parts_scp[1].split(':')
-    #
-    #     feat_scp.append((utt_id, file, int(shift)))
-    #     #landmark_ordered.append((landmark[utt_id], utt_id))
-    #
-    #return landmark_ordered, feat_scp, feat_scp_file
-

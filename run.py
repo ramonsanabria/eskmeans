@@ -30,33 +30,49 @@ args = parser.parse_args()
 language = args.lan
 speaker = args.spk
 
+
 #arguments eskmeans
 max_number_centroids = args.n_c
 min_duration = args.m_d
 feature_type = args.f_t
 
 pooling_method = "herman"
+#pooling_method = "average"
+
 centroid_init_method = "spread_herman"
-min_segments = 0
-max_segments = 6
+
+feature_type = "mfcc"
+#feature_type = "hubert_base_ls960"
+
+unit_test = True
+
+min_edges = 0
+max_edges = 6
+min_duration = 20
+
 nepochs = 10
-feat_dim = 13
 
-landmarks_dict, feat_npy = data_utils.load_dataset(language, speaker, "npz")
+if(feature_type == "mfcc"):
+    feat_dim = 13
+else:
+    feat_dim = 768
 
-pooling_engine = PoolingEngine(pooling_method, feature_dim=feat_dim)
+landmarks_dict, feat_npy = data_utils.load_dataset(language, speaker, feature_type)
+
+pooling_engine = PoolingEngine(pooling_method, feat_dim, feature_type)
 
 #initialize clustering
 num_centroids, den_centroids, initial_segments, centroid_rands = initialize_clusters(landmarks_dict,
-                                                                  feat_npy,
-                                                                  max_number_centroids,
-                                                                  centroid_init_method,
-                                                                  "herman",
-                                                                  pooling_engine,
-                                                                  "npz",
-                                                                  language,
-                                                                  speaker)
+                                                                                     feat_npy,
+                                                                                     centroid_init_method,
+                                                                                     pooling_engine,
+                                                                                     "npz",
+                                                                                     language,
+                                                                                     speaker,
+                                                                                     max_edges,
+                                                                                     unit_test)
 
+sys.exit()
 #create centroid object
 centroids = Centroids(num_centroids, den_centroids, language, speaker, centroid_rands)
 
@@ -68,7 +84,10 @@ landmarks, transcriptions = eskmeans(landmarks_dict,
                                      pooling_engine,
                                      initial_segments,
                                      language,
-                                     speaker)
+                                     speaker,
+                                     min_edges,
+                                     max_edges,
+                                     min_duration)
 
 #save results
 #result_folder = os.path.join("results", feature_type+"_"+pooling_method)

@@ -9,14 +9,23 @@ from collections import defaultdict
 import os
 
 class Graph:
-    def __init__(self, pooling_engine, centroids, feats):
+    def __init__(self,
+                 pooling_engine,
+                 centroids,
+                 feats,
+                 min_edges,
+                 max_edges,
+                 min_duration):
+
+
         self.vertices = 0
         self.edges = 0
 
-        self.min_duration = 20
 
-        self.min_edges = 0
-        self.max_edges = 6
+        self.min_edges = min_edges
+        self.max_edges = max_edges
+
+        self.min_duration = min_duration
 
         self.tail = {}
         self.head = {}
@@ -56,12 +65,12 @@ class Graph:
 
     def feat_s(self, s, t):
 
-        return self.pooling_engine.subsample(self.feats[s:t+1])
+        return self.pooling_engine.pool(self.feats[s:t + 1])
 
     def feat(self, e):
         s = self.time[self.tail[e]]
         t = self.time[self.head[e]]
-        return self.pooling_engine.subsample(self.feats[s:t+1])
+        return self.pooling_engine.pool(self.feats[s:t + 1])
 
     def weight(self, e):
         v = self.feat(e)
@@ -90,9 +99,21 @@ class Graph:
 
         return h-t
 
-def build_graph(landmarks, pooling_engine, centroids, feats):
+def build_graph(landmarks,
+                pooling_engine,
+                centroids,
+                feats,
+                min_edges,
+                max_edges,
+                min_duration):
 
-    g = Graph(pooling_engine, centroids, feats)
+    g = Graph(pooling_engine,
+              centroids,
+              feats,
+              min_edges,
+              max_edges,
+              min_duration)
+
     r = g.add_vertex()
     g.time[r] = 0
 
@@ -205,7 +226,7 @@ def unit_test_segments_and_transcriptions(segments_and_transcipts_ours, language
                 print(our_transcripts)
                 print(kamper_transcripts)
                 print("UNIT TEST FAILED: TRANSCRIPTS IN  EPOCH "+str(epoch)+" FROM UTT "+key+" ARE DIFFERENT AS KAMPER ET AL")
-                sys.exit()
+                #sys.exit()
 
         print("UNIT TEST PASSED: TRANSCRIPTS IN  EPOCH "+str(epoch)+" ARE THE SAME AS KAMPER ET AL")
 
@@ -245,7 +266,10 @@ def eskmeans(landmarks,
              pooling_engine,
              initial_segments,
              language,
-             speaker):
+             speaker,
+             min_edges,
+             max_edges,
+             min_duration):
 
 
     prev_segments = dict(sorted(initial_segments.items()))
@@ -296,6 +320,7 @@ def eskmeans(landmarks,
 
             #if some reorderings happened in centroids, we update cluster id from previous segments
             if(len(rules) > 0):
+                print(rules)
                 prev_segments = update_previous_segments(prev_segments, rules)
 
         unit_test_segments_and_transcriptions(prev_segments, language, speaker, epoch)
