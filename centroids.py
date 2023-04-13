@@ -56,6 +56,7 @@ class Centroids:
         #removing previous segments from the centroid
         all_args = []
         new_rules = []
+        seg_and_cids = []
 
         #print("deleting segments: "+str([el[0] for el in prev_segments]))
         for arg, segment in prev_segments:
@@ -66,9 +67,6 @@ class Centroids:
             #    if(rule[0] == arg):
             #        print("applying rule:"+str(rule))
             #        arg = rule[1]
-
-            #if(arg == 231):
-            #    print("PRE del k:"+str(arg)+" count: "+str(self.den_centroids[arg]))
 
             v = g.feat_s(segment[0],segment[1])
             all_args.append(arg)
@@ -95,6 +93,9 @@ class Centroids:
 
             self.__num_centroids[:, arg] += v
             self.den_centroids[arg] += 1
+
+
+            seg_and_cids.append((arg, (g.time[g.tail[e]], g.time[g.head[e]])))
 
 
         for idx_den_zero in np.where(self.den_centroids[:self.__non_randomly_initialized_centroids] == 0)[0][::-1]:
@@ -124,7 +125,7 @@ class Centroids:
         self.den_centroids[self.__non_randomly_initialized_centroids:] = 0
 
         #return the only the new rules (otherwise new rules will be empty)
-        return new_rules
+        return new_rules, seg_and_cids
 
     def get_final_centroids(self):
 

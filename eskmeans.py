@@ -239,7 +239,7 @@ def eskmeans(landmarks,
         centroids.reset_rules_for_previous_segment()
 
         #for idx_sample in tqdm(utt_order):
-        for idx_sample in tqdm(utt_order):
+        for idx_sample in utt_order:
 
             #get utterance id so we can use it to retrive
             utt_id = utt_ids[idx_sample]
@@ -253,14 +253,15 @@ def eskmeans(landmarks,
                             max_edges,
                             min_duration)
 
-            edges, seg_and_cids, nll = shortest_path(g)
+            edges, _, nll = shortest_path(g)
+
             nll_epoch += nll
 
 
             #maximitzation: modify centroids
             #we return segments just in case some reordering is needed
-            rules = centroids.up_centroids_and_comp_weights(
-                            prev_segments[utt_id],
+            #TODO output sge_and_cids according to herman's
+            rules, seg_and_cids = centroids.up_centroids_and_comp_weights( prev_segments[utt_id],
                             edges,
                             g,
                             epoch)
@@ -270,7 +271,6 @@ def eskmeans(landmarks,
 
             #if some reorderings happened in centroids, we update cluster id from previous segments
             if(len(rules) > 0):
-                print(rules)
                 prev_segments = update_previous_segments(prev_segments, rules)
 
 
