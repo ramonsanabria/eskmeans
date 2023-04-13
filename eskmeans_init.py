@@ -3,6 +3,8 @@ import kaldi_io
 
 from collections import defaultdict
 
+import unit_test
+
 import random
 import pickle
 import sys
@@ -80,7 +82,7 @@ def make_assignments_consecutive(assignments):
             break
     return assignments
 
-def spread_herman(landmarks, feats, pooling_function, feats_format, language, speaker_id, unit_test):
+def spread_herman(landmarks, feats, pooling_function, feats_format, language, speaker_id, unit_test_flag):
 
     #number of centroids is the 20% of the number of landmarks
     n_ladmarks = sum([len(value) for value in landmarks.values()])
@@ -155,7 +157,7 @@ def spread_herman(landmarks, feats, pooling_function, feats_format, language, sp
     centroid_kampereral = np.load('./data/kamperetal_init_centroids/'+language+'/'+speaker_id+'.npy')
     centroids = centroids.transpose()
 
-    if(unit_test):
+    if(unit_test_flag):
         if(np.allclose(centroid_kampereral, centroids, atol=0.001)):
             print("UNIT TEST PASSED: INITIAL CENTROIDS ARE THE SAME AS KAMPER ET AL")
             print("\tTOTAL DIFF: "+str(np.sum(centroid_kampereral - centroids)))
@@ -193,7 +195,7 @@ def create_centroid_rands(num_centroids,
 
 
     feats = dict(sorted(feats.items()))
-    centroids_rands = np.zeros((pooling.get_out_feat_dim(), num_centroids))
+    centroids_rand_init = np.zeros((pooling.get_out_feat_dim(), num_centroids))
     list_land_feats = []
 
     for utt_id in feats.keys():
@@ -210,10 +212,9 @@ def create_centroid_rands(num_centroids,
         i, j, utt_id = list_land_feats[idx_segment]
         feats_utt = feats[utt_id]
 
-        centroids_rands[:, idx_centroids] = pooling.pool(feats_utt, i, j)
+        centroids_rand_init[:, idx_centroids] = pooling.pool(feats_utt, i, j)
 
-    return centroids_rands
-
+    return centroids_rand_init
 
 def initialize_clusters(landmarks,
                         feats,
@@ -223,7 +224,7 @@ def initialize_clusters(landmarks,
                         language,
                         speaker_id,
                         max_edges,
-                        unit_test):
+                        unit_test_flag):
 
     if(init_technique == "init_hao"):
         num_centroids, den_centroids, initial_segments = init_random_hao(landmarks, feats, ncentroids)
@@ -236,29 +237,22 @@ def initialize_clusters(landmarks,
                                                                        format,
                                                                        language,
                                                                        speaker_id,
-                                                                       unit_test)
+                                                                       unit_test_flag)
 
 
         ncentroids = num_centroids.shape[1]
-        centroid_rands = create_centroid_rands( ncentroids,
+        centroid_rand_init = create_centroid_rands( ncentroids,
                                                 feats,
                                                 landmarks,
                                                 pooling_function,
                                                 max_edges)
 
-        herman_centroid_rands = np.load("./data/kamperetal_init_centroids/"
-                             +language+"/"+speaker_id+"_rand.npy").transpose()
-        if(unit_test):
-           if(np.allclose(herman_centroid_rands, centroid_rands, atol=0.001)):
-                print("UNIT TEST PASSED: RANDOM CENTROIDS ARE THE SAME AS KAMPER ET AL")
-                print("\tTOTAL DIFF: "+str(np.sum(herman_centroid_rands - centroid_rands)))
-           else:
-               print("UNIT TEST FAILED: RANDOM CENTROIDS ARE NOT THE SAME AS KAMPER ET AL")
-               print("\tTOTAL DIFF: "+str(np.sum(herman_centroid_rands - centroid_rands)))
-               sys.exit()
-        sys.exit()
+
+        if(unit_test_flag):
+            unit_test.centroid_rands(centroid_rand_init, language, speaker_id)
+
     else:
         print("init_technique (cluster initialization) not supported: "+str(init_technique))
         sys.exit()
 
-    return num_centroids, den_centroids, initial_segments, centroid_rands
+    return num_centroids, den_centroids, initial_segments, centroid_rand_init

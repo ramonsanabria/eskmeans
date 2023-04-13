@@ -72,7 +72,6 @@ num_centroids, den_centroids, initial_segments, centroid_rands = initialize_clus
                                                                                      max_edges,
                                                                                      unit_test)
 
-sys.exit()
 #create centroid object
 centroids = Centroids(num_centroids, den_centroids, language, speaker, centroid_rands)
 
