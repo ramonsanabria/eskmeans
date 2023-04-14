@@ -1,4 +1,5 @@
 import numpy as np
+
 import kaldi_io
 
 from collections import defaultdict
@@ -103,6 +104,7 @@ def spread_herman(landmarks, feats, pooling_function, feats_format, language, sp
     random.seed(2)
     random.shuffle(assignments)
 
+
     if(feats_format == 'npz'):
         feats_dict = feats
     elif(feats_format == 'scp'):
@@ -169,7 +171,8 @@ def create_centroid_rands(num_centroids,
                           feats,
                           landmarks,
                           pooling,
-                          max_edges):
+                          max_edges,
+                          unit_test_flag):
 
 
     feats = dict(sorted(feats.items()))
@@ -183,6 +186,7 @@ def create_centroid_rands(num_centroids,
                 list_land_feats.append((prev_landmark, j, utt_id))
             prev_landmark = landmarks[utt_id][i]
 
+    #if(unit_test_flag):
     np.random.seed(2)
     idx_segment = np.random.choice(len(list_land_feats), num_centroids, replace=True).tolist()
 
@@ -223,7 +227,8 @@ def initialize_clusters(landmarks,
                                                 feats,
                                                 landmarks,
                                                 pooling_function,
-                                                max_edges)
+                                                max_edges,
+                                                unit_test_flag)
 
 
         if(unit_test_flag):

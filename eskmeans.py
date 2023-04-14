@@ -1,4 +1,7 @@
-import pickle
+import random
+random.seed(2)
+
+
 
 import numpy as np
 import numpy.linalg
@@ -48,18 +51,24 @@ class Graph:
         self.in_edges[v].append(e)
         return e
 
+    # def _assign_cluster(self, v, centroids):
+    #     m = float('-inf')
+    #     arg = -1
+    #     for i, u in enumerate(centroids):
+    #
+    #         cand = np.linalg.norm(u - v)
+    #         cand = -cand * cand
+    #
+    #         if cand > m:
+    #             m = cand
+    #             arg = i
+    #
+    #     return arg, m
+
     def _assign_cluster(self, v, centroids):
-        m = float('-inf')
-        arg = -1
-        for i, u in enumerate(centroids):
-
-            cand = np.linalg.norm(u - v)
-            cand = -cand * cand
-
-            if cand > m:
-                m = cand
-                arg = i
-
+        dists = -np.linalg.norm(centroids - v, axis=1) ** 2
+        arg = np.argmax(dists)
+        m = dists[arg]
         return arg, m
 
     def feat_s(self, s, t):
@@ -123,8 +132,6 @@ def build_graph(landmarks,
     for u in range(g.vertices):
         for v in range(u + 1, g.vertices):
             g.add_edge(u, v)
-
-
     return g
 
 
@@ -208,7 +215,7 @@ def convert_to_segments_and_transcriptions(segments_and_transcriptioss):
         transcriptions[utt_id] = [el[0] for el in segments_and_transcriptioss[utt_id]]
         segments[utt_id] = [el[1] for el in segments_and_transcriptioss[utt_id]]
 
-    return transcriptions, segments
+    return segments, transcriptions
 
 def eskmeans(landmarks,
              feats,
@@ -220,7 +227,8 @@ def eskmeans(landmarks,
              speaker,
              min_edges,
              max_edges,
-             min_duration):
+             min_duration,
+             unit_test_flag):
 
 
     prev_segments = dict(sorted(initial_segments.items()))
@@ -233,16 +241,18 @@ def eskmeans(landmarks,
     for epoch in range(nepoch):
 
         print("ITERATION: ", epoch)
-        #TODO uncomment this after replicating one epoch
-        #utt_order = random.shuffle(feat_idxs)
-        utt_order = utt_idxs
+
+        #if(not unit_test):
+        random.shuffle(utt_idxs)
+        #else:
+            #utt_order = utt_idxs
 
         nll_epoch = 0
 
         #reset rules for centroid exchnage
         centroids.reset_rules_for_previous_segment()
 
-        for idx_sample in tqdm(utt_order):
+        for idx_sample in tqdm(utt_idxs):
         #for idx_sample in utt_order:
 
             #get utterance id so we can use it to retrive
@@ -261,7 +271,6 @@ def eskmeans(landmarks,
 
             nll_epoch += nll
 
-
             #maximitzation: modify centroids
             #we return segments just in case some reordering is needed
             rules, seg_and_cids = centroids.up_centroids_and_comp_weights( prev_segments[utt_id],
@@ -276,9 +285,10 @@ def eskmeans(landmarks,
             if(len(rules) > 0):
                 prev_segments = update_previous_segments(prev_segments, rules)
 
+        if(unit_test_flag):
+            unit_test.segments_and_transcriptions(prev_segments, language, speaker, epoch)
+            unit_test.centroids(centroids.get_final_centroids(), language, speaker, epoch)
 
-
-        unit_test.segments_and_transcriptions(prev_segments, language, speaker, epoch)
-        unit_test.centroids(centroids.get_final_centroids(), language, speaker, epoch)
+        print("EPOCH "+str(epoch)+" NLL: ", nll_epoch)
 
     return convert_to_segments_and_transcriptions(prev_segments)

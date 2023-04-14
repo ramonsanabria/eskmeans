@@ -93,3 +93,16 @@ def initial_centroids_and_segments(centroids, initial_segments, language, speake
         print("UNIT TEST FAILED: CENTROIDS ARE NOT THE SAME AS KAMPER ET AL")
         print("\tTOTAL DIFF: "+str(np.sum(centroid_kampereral - centroids)))
         sys.exit()
+
+def utterance_ids(feat_ours, language, speaker):
+
+        main_path = os.path.join("/disk/scratch1/ramons/data/zerospeech_seg/mfcc_herman/",language,speaker)
+        mfcc_herman_ids = sorted(list(np.load(os.path.join(main_path, 'raw_mfcc.npz')).keys()))
+
+        if(sorted(list(feat_ours.keys())) != mfcc_herman_ids):
+            print("the IDs (name and numbers) of the vad are NOT the same as in herman's mfccs")
+            print(sorted(list(feat_ours.keys())))
+            print(mfcc_herman_ids)
+            sys.exit()
+        else:
+            print("the IDs (name and numbers) of the vad are the same as in herman's mfccs")
