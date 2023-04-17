@@ -27,8 +27,30 @@ def write_ramons(unsup_landmarks, unsup_transcript, speaker_id, output_folder):
                 result_file.write(str(segment[2])+" "+str(segment[0])+" "+str(segment[1])+"\n")
             result_file.write("\n")
 
+def filter_short_segments(landmarks_dict, feat_np, minimum_duration):
+    deleted_segments = 0
+    new_feat_np = {}
+    new_landmarks_dict = {}
+
+    for key in list(landmarks_dict.keys()):
+        start, end = key.split("_")[-1].split("-")
+        if((int(end) - int(start)) < minimum_duration):
+            deleted_segments += 1
+        else:
+            new_feat_np[key] = feat_np[key]
+            new_landmarks_dict[key] = landmarks_dict[key]
+
+    print(str(deleted_segments)+" deleted segments due to duration < "+str(minimum_duration))
+    return new_landmarks_dict, new_feat_np
+
 #TODO sanity check dataset
-def load_dataset(language, speaker, feature_type, unit_test_flag, feature_layer="10", vad_position="prevad"):
+def load_dataset(language,
+                 speaker,
+                 feature_type,
+                 minimum_duration,
+                 unit_test_flag,
+                 feature_layer="10",
+                 vad_position="prevad"):
 
     if socket.gethostname() == "banff.inf.ed.ac.uk":
         main_path_base = os.path.join("/disk/scratch_fast/ramons/data/zerospeech_seg/mfcc_herman/",language,speaker)
@@ -46,7 +68,7 @@ def load_dataset(language, speaker, feature_type, unit_test_flag, feature_layer=
 
     if(feature_type == "mfcc"):
         feat_np = np.load(os.path.join(main_path_base, 'raw_mfcc.npz'))
-        return landmarks_dict, feat_np
+        return filter_short_segments(landmarks_dict, feat_np, minimum_duration)
 
     elif("hubert" in feature_type):
 
@@ -69,7 +91,8 @@ def load_dataset(language, speaker, feature_type, unit_test_flag, feature_layer=
         if(unit_test_flag):
             unit_test.utterance_ids(feat_np, language, speaker)
 
-        return landmarks_dict, feat_np
+
+        return filter_short_segments(landmarks_dict, feat_np, minimum_duration)
     else:
         print("format not supported")
         sys.exit()

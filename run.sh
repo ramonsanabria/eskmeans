@@ -5,8 +5,6 @@ else
     source /disk/scratch1/ramons/myenvs/p3_herman/bin/activate
 fi
 
-number_centroids=5
-language=mandarin
-speaker=A0
+language=buckeye
 
-python run.py --speaker ${speaker} --language ${language} --centroids ${number_centroids} --min_duration 20
+cat data/file_list/buckeye_spk | parallel  python run.py --speaker {} --language ${language} --feature_type hubert_base_ls960  --pooling_type average --kmeans_type em

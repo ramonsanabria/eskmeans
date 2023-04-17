@@ -125,6 +125,7 @@ def shortest_path(g):
 
     d[0] = 0
     back[0] = -1
+
     #
     # Assuming that vertices are topologically sorted
     #
@@ -143,6 +144,7 @@ def shortest_path(g):
 
         d[v] = m
         back[v] = arg
+
     #
     # Assuming that the last vertex is the final vertex
     # and that 0 is the initial vertex
@@ -322,30 +324,39 @@ def eskmeans_em(landmarks,
         prev_segments = {}
 
         print("\texpectation")
+
         input_data = [(utt_id, landmarks[utt_id], pooling_engine, centroids, feats[utt_id], min_edges, max_edges,
                        min_duration)
                       for utt_id in utt_ids]
 
-        #with mp.Pool(mp.cpu_count()) as pool:
-        with mp.Pool(3) as pool:
+
+        with mp.Pool(1) as pool:
 
             for utt_id, seg_and_cids, nll in tqdm(pool.imap_unordered(process_sample,
-                                                                      input_data),
-                                                                    total=len(utt_ids)):
+                                                                        input_data),
+                                                                        total=len(utt_ids)):
+
                 nll_epoch += nll
                 prev_segments[utt_id] = seg_and_cids
+
+        #for arg in input_data:
+
+        #    utt_id, seg_and_cids, nll = process_sample(arg)
+        #    nll_epoch += nll
+        #    prev_segments[utt_id] = seg_and_cids
 
         print("\tmaximization")
         print("\t\tacomulating")
 
+        #reset centroids
         centroids.reset()
-        for utt_id in utt_ids:
 
-            #acomulate centroids
+        # acomulate centroids
+        for utt_id in utt_ids:
             centroids.add_to_centroids(prev_segments[utt_id], feats[utt_id], pooling_engine)
 
-
         print("\t\tmaximizing")
+        #maximize and deal with empty centroids
         centroids.compute_centroids()
 
         print("EPOCH "+str(epoch)+" NLL: ", nll_epoch)

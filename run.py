@@ -65,6 +65,7 @@ if("hubert" in feature_type):
     landmarks_dict, feat_npy = data_utils.load_dataset(language,
                                                        speaker,
                                                        feature_type,
+                                                       min_duration,
                                                        unit_test_flag,
                                                        feature_layer,
                                                        vad_position)
@@ -73,6 +74,7 @@ else:
     landmarks_dict, feat_npy = data_utils.load_dataset(language,
                                                        speaker,
                                                        feature_type,
+                                                       min_duration,
                                                        unit_test_flag)
 
 pooling_engine = PoolingEngine(pooling_type, feat_dim, feature_type)
@@ -115,7 +117,7 @@ elif(kmeans_type == "em"):
     if ("banff.inf.ed.ac.uk" == current_hostname):
 
         centroids_gt = np.load("/disk/scratch_fast/ramons/data/hubert_data/word_centroids/zsc/hubert_base_ls960/10"
-                               "/prevad"/norm/"+language+"/"+speaker+".npy").transpose()
+                               "/prevad"+"/norm/"+language+"/"+speaker+".npy").transpose()
     else:
         centroids_gt = np.load("/disk/scratch1/ramons/data/hubert_data/word_centroids/zsc/hubert_base_ls960/10/prevad"
                                "/norm/"+language+"/"+speaker+".npy").transpose()

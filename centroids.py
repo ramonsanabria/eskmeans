@@ -153,8 +153,6 @@ class CentroidsEm:
             self.num_centroids[centroid_assigned,:] += pooling_engine.pool(feats, start, end)
             self.den_centroids[centroid_assigned] += 1
 
-            empty_indices = np.where(self.den_centroids == 0)[0]
-            self.centroids = np.delete(self.centroids, empty_indices, axis=0)
 
     def compute_centroids(self):
         """
@@ -163,6 +161,12 @@ class CentroidsEm:
         non_empty_indices = np.where(self.den_centroids != 0)[0]
         self.centroids[non_empty_indices, :] = self.num_centroids[non_empty_indices, :] / self.den_centroids[
             non_empty_indices, None]
+
+        empty_indices = np.where(self.den_centroids == 0)[0]
+        self.centroids = np.delete(self.centroids, empty_indices, axis=0)
+        if(empty_indices.shape[0] > 0):
+            print("\t\t\t"+str(empty_indices.shape[0])+" CLUSTERS DELETED")
+            print("\t\t\t"+str(self.centroids.shape[0])+" CLUSTERS LEFT")
 
     def get_centroids(self):
         """
