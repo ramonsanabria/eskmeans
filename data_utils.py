@@ -4,6 +4,7 @@ import pickle
 import numpy as np
 import unit_test
 from collections import defaultdict
+import socket
 
 def write_ramons(unsup_landmarks, unsup_transcript, speaker_id, output_folder):
 
@@ -27,9 +28,12 @@ def write_ramons(unsup_landmarks, unsup_transcript, speaker_id, output_folder):
             result_file.write("\n")
 
 #TODO sanity check dataset
-def load_dataset(language, speaker, feature_type, unit_test_flag, layer=10):
+def load_dataset(language, speaker, feature_type, unit_test_flag, feature_layer="10", vad_position="prevad"):
 
-    main_path_base = os.path.join("/disk/scratch1/ramons/data/zerospeech_seg/mfcc_herman/",language,speaker)
+    if socket.gethostname() == "banff.inf.ed.ac.uk":
+        main_path_base = os.path.join("/disk/scratch_fast/ramons/data/zerospeech_seg/mfcc_herman/",language,speaker)
+    else:
+        main_path_base = os.path.join("/disk/scratch1/ramons/data/zerospeech_seg/mfcc_herman/",language,speaker)
 
     landmark_file = open(os.path.join(main_path_base, 'landmarks.pkl'), 'rb')
     landmark = pickle.load(landmark_file)
@@ -47,15 +51,23 @@ def load_dataset(language, speaker, feature_type, unit_test_flag, layer=10):
     elif("hubert" in feature_type):
 
 
-        main_path = os.path.join("/disk/scratch1/ramons/data/hubert_data/seg/zsc/",
-                                 feature_type, str(layer),
-                                 "norm",
-                                 language,
-                                 "postvad")
+        if socket.gethostname() == "banff.inf.ed.ac.uk":
+            main_path = os.path.join("/disk/scratch_fast/ramons/data/hubert_data/seg/zsc/",
+                                     feature_type,
+                                     str(feature_layer),
+                                     language,
+                                     vad_position)
+        else:
+            main_path = os.path.join("/disk/scratch1/ramons/data/hubert_data/seg/zsc/",
+                                     feature_type,
+                                     str(feature_layer),
+                                     language,
+                                     vad_position)
 
         feat_np = np.load(os.path.join(main_path, speaker+"_features_frame.npz"))
 
-        unit_test.utterance_ids(feat_np, language, speaker)
+        if(unit_test_flag):
+            unit_test.utterance_ids(feat_np, language, speaker)
 
         return landmarks_dict, feat_np
     else:

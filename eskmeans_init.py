@@ -200,7 +200,7 @@ def create_centroid_rands(num_centroids,
 
 def initialize_clusters(landmarks,
                         feats,
-                        init_technique,
+                        cluster_init_type,
                         pooling_function,
                         format,
                         language,
@@ -208,11 +208,11 @@ def initialize_clusters(landmarks,
                         max_edges,
                         unit_test_flag):
 
-    if(init_technique == "init_hao"):
+    if(cluster_init_type == "init_hao"):
         num_centroids, den_centroids, initial_segments = init_random_hao(landmarks, feats, ncentroids)
 
 
-    elif(init_technique == "spread_herman"):
+    elif(cluster_init_type == "herman"):
         num_centroids, den_centroids, initial_segments = spread_herman(landmarks,
                                                                        feats,
                                                                        pooling_function,
@@ -230,12 +230,11 @@ def initialize_clusters(landmarks,
                                                 max_edges,
                                                 unit_test_flag)
 
-
         if(unit_test_flag):
             unit_test.centroid_rands(centroid_rand_init, language, speaker_id)
 
     else:
-        print("init_technique (cluster initialization) not supported: "+str(init_technique))
+        print("init_technique (cluster initialization) not supported: " + str(cluster_init_type))
         sys.exit()
 
     return num_centroids, den_centroids, initial_segments, centroid_rand_init

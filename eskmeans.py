@@ -1,10 +1,7 @@
 import random
-random.seed(2)
-
-
-
 import numpy as np
 import numpy.linalg
+import multiprocessing as mp
 from tqdm import tqdm
 import unit_test
 import collections
@@ -22,7 +19,6 @@ class Graph:
 
         self.vertices = 0
         self.edges = 0
-
 
         self.min_edges = min_edges
         self.max_edges = max_edges
@@ -51,24 +47,12 @@ class Graph:
         self.in_edges[v].append(e)
         return e
 
-    # def _assign_cluster(self, v, centroids):
-    #     m = float('-inf')
-    #     arg = -1
-    #     for i, u in enumerate(centroids):
-    #
-    #         cand = np.linalg.norm(u - v)
-    #         cand = -cand * cand
-    #
-    #         if cand > m:
-    #             m = cand
-    #             arg = i
-    #
-    #     return arg, m
 
     def _assign_cluster(self, v, centroids):
         dists = -np.linalg.norm(centroids - v, axis=1) ** 2
         arg = np.argmax(dists)
         m = dists[arg]
+
         return arg, m
 
     def feat_s(self, s, t):
@@ -220,7 +204,7 @@ def convert_to_segments_and_transcriptions(segments_and_transcriptioss):
 def eskmeans(landmarks,
              feats,
              centroids,
-             nepoch,
+             nepochs,
              pooling_engine,
              initial_segments,
              language,
@@ -230,29 +214,25 @@ def eskmeans(landmarks,
              min_duration,
              unit_test_flag):
 
-
     prev_segments = dict(sorted(initial_segments.items()))
     feats = dict(sorted(feats.items()))
 
     utt_ids = list(feats.keys())
     utt_idxs = list(range(len(feats)))
 
+    nll_prev = -float('inf')
 
-    for epoch in range(nepoch):
+    for epoch in range(nepochs):
 
         print("ITERATION: ", epoch)
 
-        #if(not unit_test):
-        random.shuffle(utt_idxs)
-        #else:
-            #utt_order = utt_idxs
+        if not unit_test:
+            random.shuffle(utt_idxs)
 
         nll_epoch = 0
 
-        #reset rules for centroid exchnage
-        centroids.reset_rules_for_previous_segment()
-
-        for idx_sample in tqdm(utt_idxs):
+        #for idx_sample in tqdm(utt_idxs):
+        for idx_sample in utt_idxs:
         #for idx_sample in utt_order:
 
             #get utterance id so we can use it to retrive
@@ -282,7 +262,7 @@ def eskmeans(landmarks,
 
 
             #if some reorderings happened in centroids, we update cluster id from previous segments
-            if(len(rules) > 0):
+            if len(rules) > 0:
                 prev_segments = update_previous_segments(prev_segments, rules)
 
         if(unit_test_flag):
@@ -290,5 +270,90 @@ def eskmeans(landmarks,
             unit_test.centroids(centroids.get_final_centroids(), language, speaker, epoch)
 
         print("EPOCH "+str(epoch)+" NLL: ", nll_epoch)
+
+        if(nll_epoch == nll_prev):
+            print("NLL did not improve, stopping training")
+            break
+
+        nll_prev=nll_epoch
+
+    return convert_to_segments_and_transcriptions(prev_segments)
+
+
+def process_sample(args):
+
+    utt_id, landmarks, pooling_engine, centroids, feats, min_edges, max_edges, min_duration = args
+
+    # expectation: compute shortest path
+    g = build_graph(landmarks,
+                    pooling_engine,
+                    centroids.get_centroids(),
+                    feats,
+                    min_edges,
+                    max_edges,
+                    min_duration)
+
+    edges, seg_and_cids, nll = shortest_path(g)
+
+    return utt_id, seg_and_cids, nll
+
+
+def eskmeans_em(landmarks,
+                feats,
+                centroids,
+                nepochs,
+                pooling_engine,
+                min_edges,
+                max_edges,
+                min_duration):
+
+    feats = dict(sorted(feats.items()))
+    prev_segments = {}
+
+    utt_ids = list(feats.keys())
+
+    nll_prev = -float('inf')
+
+    for epoch in range(nepochs):
+
+        print("ITERATION: ", epoch)
+
+        nll_epoch = 0
+        prev_segments = {}
+
+        print("\texpectation")
+        input_data = [(utt_id, landmarks[utt_id], pooling_engine, centroids, feats[utt_id], min_edges, max_edges,
+                       min_duration)
+                      for utt_id in utt_ids]
+
+        #with mp.Pool(mp.cpu_count()) as pool:
+        with mp.Pool(3) as pool:
+
+            for utt_id, seg_and_cids, nll in tqdm(pool.imap_unordered(process_sample,
+                                                                      input_data),
+                                                                    total=len(utt_ids)):
+                nll_epoch += nll
+                prev_segments[utt_id] = seg_and_cids
+
+        print("\tmaximization")
+        print("\t\tacomulating")
+
+        centroids.reset()
+        for utt_id in utt_ids:
+
+            #acomulate centroids
+            centroids.add_to_centroids(prev_segments[utt_id], feats[utt_id], pooling_engine)
+
+
+        print("\t\tmaximizing")
+        centroids.compute_centroids()
+
+        print("EPOCH "+str(epoch)+" NLL: ", nll_epoch)
+
+        if(nll_epoch == nll_prev):
+            print("NLL did not improve, stopping training")
+            break
+
+        nll_prev=nll_epoch
 
     return convert_to_segments_and_transcriptions(prev_segments)

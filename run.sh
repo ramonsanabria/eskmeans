@@ -1,6 +1,12 @@
-source /disk/scratch1/ramons/myenvs/p3_herman/bin/activate
-export KALDI_ROOT=/disk/scratch1/ramons/myapps/kaldi/
+if [ $(hostname) = "banff.inf.ed.ac.uk" ]
+then
+    source /disk/scratch_fast/ramons/myenvs/p3_herman/bin/activate
+else
+    source /disk/scratch1/ramons/myenvs/p3_herman/bin/activate
+fi
 
+number_centroids=5
 language=mandarin
+speaker=A0
 
-cat ./${language}_spk | parallel python run.py --speaker {} --language ${language} --feature_type hubert_base_ls960 --pooling_type average
+python run.py --speaker ${speaker} --language ${language} --centroids ${number_centroids} --min_duration 20

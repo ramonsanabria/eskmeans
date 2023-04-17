@@ -3,7 +3,7 @@ import sys
 
 class Centroids:
 
-    def __init__(self, num_centroids, den_centroids, language, speaker_id, centroids_rand):
+    def __init__(self, num_centroids, den_centroids, centroids_rand):
         """
         Constructor for the Centroids class.
 
@@ -18,9 +18,6 @@ class Centroids:
         self.__centroids = self.__num_centroids / self.den_centroids
 
         self.__centroids_rand = centroids_rand
-
-        #rules to reorder previous segments
-        self.__rules_previous_segments = []
 
         #keep tracking of randomly sampled centroids
         self.__non_randomly_initialized_centroids = den_centroids.shape[0]
@@ -58,15 +55,7 @@ class Centroids:
         new_rules = []
         seg_and_cids = []
 
-        #print("deleting segments: "+str([el[0] for el in prev_segments]))
         for arg, segment in prev_segments:
-            #C19_041232-041902
-
-            #chage segment ids according to the rules
-            #for rule in self.__rules_previous_segments:
-            #    if(rule[0] == arg):
-            #        print("applying rule:"+str(rule))
-            #        arg = rule[1]
 
             v = g.feat_s(segment[0],segment[1])
             all_args.append(arg)
@@ -112,7 +101,6 @@ class Centroids:
                 self.__centroids[:,self.__non_randomly_initialized_centroids] = \
                     self.__centroids_rand[:,self.__non_randomly_initialized_centroids]
 
-                self.__rules_previous_segments.append((self.__non_randomly_initialized_centroids, idx_den_zero))
                 new_rules.append((self.__non_randomly_initialized_centroids, idx_den_zero))
 
         #we remove the last centroid(s)
@@ -138,9 +126,46 @@ class Centroids:
         """
         return self.__centroids.transpose()
 
-    def reset_rules_for_previous_segment(self):
-        """
-        Resets the rules -- this is excuted at end of every epoch
-        """
+class CentroidsEm:
 
-        self.__rules_previous_segments = []
+    def __init__(self, centroids):
+        self.centroids = centroids
+        self.num_centroids = np.zeros(self.centroids.shape)
+        self.den_centroids = np.zeros(self.centroids.shape[0])
+
+    def reset(self):
+        """
+        Resets the centroids
+        """
+        self.num_centroids = np.zeros(self.centroids.shape)
+        self.den_centroids = np.zeros(self.centroids.shape[0])
+
+    def add_to_centroids(self, segments, feats, pooling_engine):
+        """
+        Adds the features to the centroids.
+        :param segments: list of tuples of cluster_id and (start, end).
+        :param feats: numpy.ndarray of features.
+        :param pooling_engine: PoolingEngine object that contains all needed for pooling.
+        """
+        for centroid_assigned, start_end in segments:
+
+            start, end = start_end
+            self.num_centroids[centroid_assigned,:] += pooling_engine.pool(feats, start, end)
+            self.den_centroids[centroid_assigned] += 1
+
+            empty_indices = np.where(self.den_centroids == 0)[0]
+            self.centroids = np.delete(self.centroids, empty_indices, axis=0)
+
+    def compute_centroids(self):
+        """
+        Computes the centroids.
+        """
+        non_empty_indices = np.where(self.den_centroids != 0)[0]
+        self.centroids[non_empty_indices, :] = self.num_centroids[non_empty_indices, :] / self.den_centroids[
+            non_empty_indices, None]
+
+    def get_centroids(self):
+        """
+        Returns the centroids.
+        """
+        return self.centroids
