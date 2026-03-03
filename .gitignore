@@ -1,3 +1,23 @@
+# Virtual environment
+.venv/
+
+# Results and data
 ./results/
 ./data/
 
+# Python cache
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# Distribution / packaging
+*.egg-info/
+dist/
+build/
+
+# Jupyter
+.ipynb_checkpoints/
+
+# Env files
+.env
