@@ -52,12 +52,11 @@ def load_dataset(language,
                  feature_layer="10",
                  vad_position="prevad"):
 
-    data_base = os.environ.get('ESKMEANS_DATA')
-    if data_base is None:
-        if socket.gethostname() == "banff.inf.ed.ac.uk":
-            data_base = "/disk/scratch_fast/ramons/data"
-        else:
-            data_base = "/disk/scratch1/ramons/data"
+    if socket.gethostname() == "banff.inf.ed.ac.uk":
+        default_data_base = "/disk/scratch_fast/ramons/data"
+    else:
+        default_data_base = "/disk/scratch1/ramons/data"
+    data_base = os.environ.get('ESKMEANS_DATA', default_data_base)
 
     main_path_base = os.path.join(data_base, "zerospeech_seg/mfcc_herman", language, speaker)
 
@@ -74,7 +73,7 @@ def load_dataset(language,
         feat_np = np.load(os.path.join(main_path_base, 'raw_mfcc.npz'))
         return filter_short_segments(landmarks_dict, feat_np, minimum_duration)
 
-    elif("hubert" in feature_type):
+    elif feature_type in ("hubert_base_ls960", "mhubert", "wavlm_large"):
 
 
         main_path = os.path.join(data_base, "hubert_data/seg/zsc",

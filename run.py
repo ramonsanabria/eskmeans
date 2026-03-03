@@ -16,9 +16,9 @@ parser = argparse.ArgumentParser(description='ESKMeans segmentattion')
 parser.add_argument('--language', dest='lan', type=str,  choices=["buckeye", "mandarin"], help='datraset to use only available [buckeye, dummy]')
 parser.add_argument('--speaker', dest='spk', type=str, help='speaker to train for')
 parser.add_argument('--feature_type',
-                    choices = ["mfcc", "hubert_base_ls960"],
+                    choices = ["mfcc", "hubert_base_ls960", "mhubert", "wavlm_large"],
                     type=str,
-                    help='feature type to use (mfcc, hubert_base_ls960)')
+                    help='feature type to use')
 
 parser.add_argument('--pooling_type',
                     choices = ["herman", "average"],
@@ -53,8 +53,22 @@ min_duration = 20
 
 nepochs = 10
 
-if("hubert" in feature_type):
-    feat_dim = 768
+FEAT_DIMS = {
+    "mfcc": 13,
+    "hubert_base_ls960": 768,
+    "mhubert": 768,
+    "wavlm_large": 1024,
+}
+
+feat_dim = FEAT_DIMS[feature_type]
+
+if feature_type == "mfcc":
+    landmarks_dict, feat_npy = data_utils.load_dataset(language,
+                                                       speaker,
+                                                       feature_type,
+                                                       min_duration,
+                                                       unit_test_flag)
+else:
     landmarks_dict, feat_npy = data_utils.load_dataset(language,
                                                        speaker,
                                                        feature_type,
@@ -62,13 +76,6 @@ if("hubert" in feature_type):
                                                        unit_test_flag,
                                                        feature_layer,
                                                        vad_position)
-else:
-    feat_dim = 13
-    landmarks_dict, feat_npy = data_utils.load_dataset(language,
-                                                       speaker,
-                                                       feature_type,
-                                                       min_duration,
-                                                       unit_test_flag)
 
 pooling_engine = PoolingEngine(pooling_type, feat_dim, feature_type)
 
@@ -105,12 +112,11 @@ if(kmeans_type == "herman"):
 elif(kmeans_type == "em"):
 
     #create centroid object
-    data_base = os.environ.get('ESKMEANS_DATA')
-    if data_base is None:
-        if socket.gethostname() == "banff.inf.ed.ac.uk":
-            data_base = "/disk/scratch_fast/ramons/data"
-        else:
-            data_base = "/disk/scratch1/ramons/data"
+    if socket.gethostname() == "banff.inf.ed.ac.uk":
+        default_data_base = "/disk/scratch_fast/ramons/data"
+    else:
+        default_data_base = "/disk/scratch1/ramons/data"
+    data_base = os.environ.get('ESKMEANS_DATA', default_data_base)
 
     centroids_gt = np.load(os.path.join(data_base,
                                         "hubert_data/word_centroids/zsc/hubert_base_ls960",
@@ -129,12 +135,11 @@ elif(kmeans_type == "em"):
                                             max_edges,
                                             min_duration)
 
-if("hubert" in feature_type):
-    #save results
-    result_folder = os.path.join("results", feature_type+"_"+pooling_type+"_l"+feature_layer+"_"+vad_position,
-                                 language)
+if feature_type == "mfcc":
+    result_folder = os.path.join("results", feature_type + "_" + pooling_type, language)
 else:
-    result_folder = os.path.join("results", feature_type+"_"+pooling_type,language)
+    result_folder = os.path.join("results", feature_type + "_" + pooling_type + "_l" + feature_layer + "_" + vad_position,
+                                 language)
 
 pathlib.Path(result_folder).mkdir(parents=True, exist_ok=True)
 data_utils.write_ramons(landmarks, transcriptions, speaker, result_folder)

@@ -12,10 +12,10 @@ class PoolingEngine:
         """
         self.method = method
         self.feature_dim = feature_dim
-        if("hubert" in feature_type):
-            self.freq_red = 2
+        if feature_type in ("hubert_base_ls960", "mhubert", "wavlm_large"):
+            self.freq_red = 2  # 20 ms stride → 1 frame = 2 centiseconds
         else:
-            self.freq_red = 1
+            self.freq_red = 1  # 10 ms stride → 1 frame = 1 centisecond
 
     def __subsample_herman(self, feats):
         n=10
