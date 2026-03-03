@@ -7,81 +7,8 @@ from collections import defaultdict
 import unit_test
 
 import random
-import pickle
 import sys
 
-
-def init_random_hao(landmark_sets, feat_scp, ncentroid):
-    f = open(feat_scp[0][1], 'rb')
-    f.seek(feat_scp[0][2])
-    feats = kaldiark.parse_feat_matrix(f)
-    feat_dim = feats.shape[1]
-    f.close()
-
-    centroids = numpy.zeros((ncentroid, feat_dim * 10))
-    ncentroid_per_scp = int(ncentroid / len(feat_scp)) + 1
-
-    k = 0
-
-    for i, scp in enumerate(feat_scp):
-        landmarks = landmark_sets[i]
-
-        f = open(scp[1], 'rb')
-        f.seek(scp[2])
-        feats = kaldiark.parse_feat_matrix(f)
-        f.close()
-
-        g = build_graph(landmarks)
-        g.feats = feats
-
-        edges = list(range(g.edges))
-        random.shuffle(edges)
-
-
-        for e in edges[:ncentroid_per_scp]:
-            if k == ncentroid:
-                break
-
-            centroids[k] = g.feat(e)
-            k += 1
-
-        if k == ncentroid:
-            break
-    return centroids
-
-def get_durations(landmarks_aux):
-    """
-    Return a list of tuple, where every tuple is the duration and the
-    :param landmarks_aux: list of landmarks (without the 0 landmarks)
-    :return: list of tuple, where every tuple is the duration and the (start, end) landmarks
-    """
-    
-    landmarks = [0,] + landmarks_aux
-
-    N = len(landmarks)
-    #durations = -1*np.ones(int(((N - 1)**2 + (N - 1))/2), dtype=int)
-    durations = []
-    j = 0
-    for t in range(1, N):
-        for i in range(t):
-            if t - i > N - 1:
-                continue
-            durations.append((landmarks[t] - landmarks[i], (landmarks[t], landmarks[i])))
-    return durations
-
-def make_assignments_consecutive(assignments):
-    """
-    Remove the -1 of the assignments
-    :param assignments: list of assignments
-    :return: list of assignments without -1
-    """
-
-    for k in range(assignments.max()):
-        while len(np.nonzero(assignments == k)[0]) == 0:
-            assignments[np.where(assignments > k)] -= 1
-        if assignments.max() == k:
-            break
-    return assignments
 
 def spread_herman(landmarks, feats, pooling_function, feats_format, language, speaker_id, unit_test_flag):
 
@@ -95,7 +22,6 @@ def spread_herman(landmarks, feats, pooling_function, feats_format, language, sp
     n_initial_segments = sum([len(value) for value in landmarks.values()])
     assignments = (list(range(ncentroids))*int(np.ceil(float(n_initial_segments)/ncentroids)))[:n_initial_segments]
 
-    #assigments = make_assignments_consecutive(np.asarray(assignments))
     den_centroids = np.zeros(ncentroids, dtype=int)
 
     for assignment in assignments:
@@ -124,7 +50,6 @@ def spread_herman(landmarks, feats, pooling_function, feats_format, language, sp
 
         #note that we are not considering 0 as a landmark. num_segments = num_landmarks - 1
         num_segments = len(landmarks[utt_id])
-        durations = get_durations(landmarks[utt_id])
         p_boundary_init = 1.0
 
         #replicate boundaries format from herman
@@ -162,10 +87,6 @@ def spread_herman(landmarks, feats, pooling_function, feats_format, language, sp
         unit_test.initial_centroids_and_segments(centroids, initial_segments, language, speaker_id)
 
     return num_centroids, den_centroids, initial_segments
-
-def random_herman(landmarks, feats_scps, max_segments, pooling_function):
-     print("here we will use initial_segments vecotr as above and assign a cluster ID to each one randomly")
-
 
 def create_centroid_rands(num_centroids,
                           feats,
@@ -208,11 +129,7 @@ def initialize_clusters(landmarks,
                         max_edges,
                         unit_test_flag):
 
-    if(cluster_init_type == "init_hao"):
-        num_centroids, den_centroids, initial_segments = init_random_hao(landmarks, feats, ncentroids)
-
-
-    elif(cluster_init_type == "herman"):
+    if(cluster_init_type == "herman"):
         num_centroids, den_centroids, initial_segments = spread_herman(landmarks,
                                                                        feats,
                                                                        pooling_function,

@@ -233,9 +233,7 @@ def eskmeans(landmarks,
 
         nll_epoch = 0
 
-        #for idx_sample in tqdm(utt_idxs):
         for idx_sample in utt_idxs:
-        #for idx_sample in utt_order:
 
             #get utterance id so we can use it to retrive
             utt_id = utt_ids[idx_sample]
@@ -338,12 +336,6 @@ def eskmeans_em(landmarks,
 
                 nll_epoch += nll
                 prev_segments[utt_id] = seg_and_cids
-
-        #for arg in input_data:
-
-        #    utt_id, seg_and_cids, nll = process_sample(arg)
-        #    nll_epoch += nll
-        #    prev_segments[utt_id] = seg_and_cids
 
         print("\tmaximization")
         print("\t\tacomulating")

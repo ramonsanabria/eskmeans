@@ -52,10 +52,14 @@ def load_dataset(language,
                  feature_layer="10",
                  vad_position="prevad"):
 
-    if socket.gethostname() == "banff.inf.ed.ac.uk":
-        main_path_base = os.path.join("/disk/scratch_fast/ramons/data/zerospeech_seg/mfcc_herman/",language,speaker)
-    else:
-        main_path_base = os.path.join("/disk/scratch1/ramons/data/zerospeech_seg/mfcc_herman/",language,speaker)
+    data_base = os.environ.get('ESKMEANS_DATA')
+    if data_base is None:
+        if socket.gethostname() == "banff.inf.ed.ac.uk":
+            data_base = "/disk/scratch_fast/ramons/data"
+        else:
+            data_base = "/disk/scratch1/ramons/data"
+
+    main_path_base = os.path.join(data_base, "zerospeech_seg/mfcc_herman", language, speaker)
 
     landmark_file = open(os.path.join(main_path_base, 'landmarks.pkl'), 'rb')
     landmark = pickle.load(landmark_file)
@@ -73,14 +77,7 @@ def load_dataset(language,
     elif("hubert" in feature_type):
 
 
-        if socket.gethostname() == "banff.inf.ed.ac.uk":
-            main_path = os.path.join("/disk/scratch_fast/ramons/data/hubert_data/seg/zsc/",
-                                     feature_type,
-                                     str(feature_layer),
-                                     language,
-                                     vad_position)
-        else:
-            main_path = os.path.join("/disk/scratch1/ramons/data/hubert_data/seg/zsc/",
+        main_path = os.path.join(data_base, "hubert_data/seg/zsc",
                                      feature_type,
                                      str(feature_layer),
                                      language,

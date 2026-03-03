@@ -45,13 +45,6 @@ pooling_type = args.pooling_type
 kmeans_type = args.kmeans_type
 centroid_init_type = "herman"
 
-#MANUAL SETTING
-#pooling_method = "herman"
-#pooling_method = "average"
-
-#feature_type = "mfcc"
-#feature_type = "hubert_base_ls960"
-
 unit_test_flag = False
 
 min_edges = 0
@@ -112,15 +105,17 @@ if(kmeans_type == "herman"):
 elif(kmeans_type == "em"):
 
     #create centroid object
-    current_hostname = socket.gethostname()
+    data_base = os.environ.get('ESKMEANS_DATA')
+    if data_base is None:
+        if socket.gethostname() == "banff.inf.ed.ac.uk":
+            data_base = "/disk/scratch_fast/ramons/data"
+        else:
+            data_base = "/disk/scratch1/ramons/data"
 
-    if ("banff.inf.ed.ac.uk" == current_hostname):
-
-        centroids_gt = np.load("/disk/scratch_fast/ramons/data/hubert_data/word_centroids/zsc/hubert_base_ls960/10"
-                               "/prevad"+"/norm/"+language+"/"+speaker+".npy").transpose()
-    else:
-        centroids_gt = np.load("/disk/scratch1/ramons/data/hubert_data/word_centroids/zsc/hubert_base_ls960/10/prevad"
-                               "/norm/"+language+"/"+speaker+".npy").transpose()
+    centroids_gt = np.load(os.path.join(data_base,
+                                        "hubert_data/word_centroids/zsc/hubert_base_ls960",
+                                        feature_layer, "prevad/norm",
+                                        language, speaker + ".npy")).transpose()
 
     centroids = CentroidsEm(centroids_gt)
 
