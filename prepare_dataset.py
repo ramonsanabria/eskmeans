@@ -1,32 +1,54 @@
 #!/usr/bin/env python3
 """
-Dataset preparation script for ESKMeans.
+Dataset preparation for ESKMeans — ZeroSpeech / Buckeye.
 
-Extracts MFCC or HuBERT features from WAV files and computes energy-based
-landmarks, saving outputs in the directory structure expected by data_utils.py.
+Steps:
+  1. (External, MATLAB) Run thetaOscillator on each recording to get syllable
+     boundaries. Save one text file per recording under --landmark_dir:
+         s0101a.txt   (one boundary in seconds per line, absolute time in recording)
+  2. (This script) Run feature extraction + package everything as one pickle
+     per recording per feature type.
 
-Set ESKMEANS_DATA to the output base directory (same value used when running):
-    export ESKMEANS_DATA=/path/to/data
+Output:
+    <ESKMEANS_DATA>/<language>/<recording_id>/mfcc.pkl
+    <ESKMEANS_DATA>/<language>/<recording_id>/hubert_base_ls960_l10.pkl
+    ...
 
-Usage (MFCC):
+Each pickle:  utt_id → {'features': np.ndarray, 'landmarks': [int, ...]}
+Utterance IDs: <recording_id>_<start_cs>-<end_cs>  (centiseconds)
+
+Landmark file format (produced by thetaOscillator):
+    One boundary per line in seconds (absolute time in the recording).
+    Example s0101a.txt:
+        0.321
+        0.487
+        1.203
+        ...
+
+ZeroSpeech VAD file:
+    mkdir -p data/zerospeech
+    curl -o data/zerospeech/english_vad.txt \
+        https://raw.githubusercontent.com/zerospeech/Zerospeech2015/master/english_vad.txt
+
+Usage:
+    export ESKMEANS_DATA=/shared/ramon/experiments_old
+
     python prepare_dataset.py \
-        --wav_dir data/wavs/s01 \
-        --language buckeye \
-        --speaker s01 \
-        --feature_type mfcc
+        --buckeye_dir /path/to/buckeye \
+        --vad_file data/zerospeech/english_vad.txt \
+        --landmark_dir /path/to/theta_oscillator_output \
+        --recording s0101a --language buckeye --feature_type mfcc
 
-Usage (HuBERT):
-    python prepare_dataset.py \
-        --wav_dir data/wavs/s01 \
-        --language buckeye \
-        --speaker s01 \
-        --feature_type hubert_base_ls960 \
-        --layer 10 \
-        --device cuda
+    # all recordings in parallel
+    cat data/file_list/buckeye_spk | parallel \
+        python prepare_dataset.py \
+            --buckeye_dir /path/to/buckeye \
+            --vad_file data/zerospeech/english_vad.txt \
+            --landmark_dir /path/to/theta_oscillator_output \
+            --recording {} --language buckeye \
+            --feature_type hubert_base_ls960 --layer 10 --device cuda
 
-Required packages:
-    pip install librosa scipy numpy
-    pip install transformers torch   # only for HuBERT
+Feature types:  mfcc | hubert_base_ls960 | mhubert | wavlm_large
 """
 
 import argparse
@@ -34,15 +56,97 @@ import os
 import pickle
 import numpy as np
 from pathlib import Path
+from collections import defaultdict
 
 SR = 16000
-MFCC_N_MFCC = 13
-MFCC_HOP_LENGTH = 160    # 10 ms at 16 kHz  →  1 frame = 1 centisecond
-HUBERT_HOP_LENGTH = 320  # 20 ms at 16 kHz  →  1 frame = 2 centiseconds
+MFCC_HOP = 160    # 10 ms  →  1 frame = 1 centisecond
+NEURAL_HOP = 320  # 20 ms  →  1 frame = 2 centiseconds
+DEFAULT_DATA_DIR = "/shared/ramon/experiments_old"
 
-# Minimum segment duration = 200 ms (matches min_duration=20 in run.py)
-MFCC_MIN_DIST_FRAMES = 20   # 20 frames × 10 ms = 200 ms
-HUBERT_MIN_DIST_FRAMES = 10  # 10 frames × 20 ms = 200 ms
+NEURAL_MODELS = {
+    'hubert_base_ls960': 'facebook/hubert-base-ls960',
+    'mhubert':           'utter-project/mHuBERT-147',
+    'wavlm_large':       'microsoft/wavlm-large',
+}
+
+
+def data_path(language, recording_id, feature_type, layer):
+    base = os.environ.get('ESKMEANS_DATA', DEFAULT_DATA_DIR)
+    fname = 'mfcc.pkl' if feature_type == 'mfcc' else f'{feature_type}_l{layer}.pkl'
+    return Path(base) / language / recording_id / fname
+
+
+# ---------------------------------------------------------------------------
+# VAD
+# ---------------------------------------------------------------------------
+
+def parse_vad(vad_file):
+    """ZeroSpeech VAD format: file_id,start_sec,end_sec"""
+    vad = defaultdict(list)
+    with open(vad_file) as f:
+        for line in f:
+            parts = line.strip().split(',')
+            if len(parts) == 3:
+                vad[parts[0].strip()].append((float(parts[1]), float(parts[2])))
+    return {k: sorted(v) for k, v in vad.items()}
+
+
+# ---------------------------------------------------------------------------
+# Landmarks
+# ---------------------------------------------------------------------------
+
+def load_landmarks(landmark_dir, recording_id):
+    """
+    Load thetaOscillator boundaries for a recording.
+    Expected file: <landmark_dir>/<recording_id>.txt
+    One boundary per line in seconds (absolute time in the recording).
+    Returns sorted list of floats, or None if file not found.
+    """
+    path = Path(landmark_dir) / f"{recording_id}.txt"
+    if not path.exists():
+        return None
+    boundaries = []
+    with open(path) as f:
+        for line in f:
+            line = line.strip()
+            if line and not line.startswith('#'):
+                try:
+                    boundaries.append(float(line))
+                except ValueError:
+                    pass
+    return sorted(boundaries)
+
+
+def landmarks_for_segment(all_boundaries, start_sec, end_sec, hop):
+    """
+    Select boundaries that fall within [start_sec, end_sec] and convert
+    to centisecond offsets relative to the segment start.
+    Always appends the last frame of the segment as a boundary.
+    """
+    dur_cs = int((end_sec - start_sec) * 100)
+    lm = []
+    for t in all_boundaries:
+        if start_sec <= t < end_sec:
+            cs = int((t - start_sec) * 100)
+            if cs > 0:
+                lm.append(cs)
+    if not lm or lm[-1] != dur_cs:
+        lm.append(dur_cs)
+    return sorted(set(lm))
+
+
+# ---------------------------------------------------------------------------
+# Audio & features
+# ---------------------------------------------------------------------------
+
+def find_wav(buckeye_dir, recording_id):
+    for path in [
+        Path(buckeye_dir) / recording_id[:3] / f"{recording_id}.wav",
+        Path(buckeye_dir) / f"{recording_id}.wav",
+    ]:
+        if path.exists():
+            return path
+    return None
 
 
 def load_audio(path):
@@ -53,138 +157,101 @@ def load_audio(path):
 
 def extract_mfcc(y):
     import librosa
-    mfcc = librosa.feature.mfcc(
-        y=y, sr=SR, n_mfcc=MFCC_N_MFCC,
-        hop_length=MFCC_HOP_LENGTH,
-        win_length=400,  # 25 ms window
-    )
-    return mfcc.T  # (frames, 13)
+    return librosa.feature.mfcc(y=y, sr=SR, n_mfcc=13,
+                                 hop_length=MFCC_HOP, win_length=400).T
 
 
-def extract_hubert(y, model, processor, layer, device):
+def extract_neural(y, model, processor, layer, device):
     import torch
-    inputs = processor(y, return_tensors='pt', sampling_rate=SR)
-    inputs = {k: v.to(device) for k, v in inputs.items()}
+    inputs = {k: v.to(device)
+              for k, v in processor(y, return_tensors='pt', sampling_rate=SR).items()}
     with torch.no_grad():
         out = model(**inputs, output_hidden_states=True)
-    # hidden_states[0] = CNN features, [1..12] = transformer layers
-    return out.hidden_states[layer].squeeze(0).cpu().numpy()  # (frames, 768)
+    return out.hidden_states[layer].squeeze(0).cpu().numpy()
 
 
-def load_hubert_model(device):
-    from transformers import HubertModel, Wav2Vec2FeatureExtractor
-    print("Loading facebook/hubert-base-ls960 ...")
-    model = HubertModel.from_pretrained("facebook/hubert-base-ls960").eval().to(device)
-    processor = Wav2Vec2FeatureExtractor.from_pretrained("facebook/hubert-base-ls960")
-    return model, processor
+def load_model(feature_type, device):
+    from transformers import AutoModel, AutoFeatureExtractor
+    hf_id = NEURAL_MODELS[feature_type]
+    print(f"Loading {hf_id} ...")
+    return (AutoModel.from_pretrained(hf_id).eval().to(device),
+            AutoFeatureExtractor.from_pretrained(hf_id))
 
 
-def compute_landmarks(feats, min_distance_frames):
-    """
-    Compute energy-based landmarks from feature frames.
-
-    Uses peaks in the L2-norm derivative as segment boundaries.
-    Always includes the last frame as the final landmark.
-
-    Returns a list of frame indices.
-    """
-    from scipy.signal import find_peaks
-    energy = np.linalg.norm(feats, axis=1)
-    diff = np.abs(np.diff(energy))
-    peaks, _ = find_peaks(diff, distance=min_distance_frames)
-    return sorted(set(peaks.tolist() + [len(feats) - 1]))
-
-
-def to_centiseconds(frame_idx, hop_length):
-    """Convert a frame index to centiseconds (10 ms units)."""
-    ms = frame_idx * hop_length / SR * 1000
-    return int(ms / 10)
-
-
-def resolve_output_base():
-    base = os.environ.get('ESKMEANS_DATA')
-    if base is None:
-        base = os.path.join(os.path.dirname(__file__), 'data', 'prepared')
-        print(f"ESKMEANS_DATA not set, writing to {base}")
-    return base
-
+# ---------------------------------------------------------------------------
+# Entry point
+# ---------------------------------------------------------------------------
 
 def main():
-    parser = argparse.ArgumentParser(description='Prepare ESKMeans dataset')
-    parser.add_argument('--wav_dir', required=True,
-                        help='Directory containing WAV files for this speaker')
-    parser.add_argument('--language', required=True, choices=['buckeye', 'mandarin'],
-                        help='Dataset / language name')
-    parser.add_argument('--speaker', required=True,
-                        help='Speaker ID (e.g. s01)')
+    parser = argparse.ArgumentParser(
+        formatter_class=argparse.RawDescriptionHelpFormatter)
+    parser.add_argument('--buckeye_dir',  required=True)
+    parser.add_argument('--vad_file',     required=True)
+    parser.add_argument('--landmark_dir', required=True,
+                        help='Directory with thetaOscillator output files '
+                             '(<recording_id>.txt, one boundary in seconds per line)')
+    parser.add_argument('--recording', default=None,
+                        help='Recording ID (e.g. s0101a). Omit for all in VAD.')
+    parser.add_argument('--language',     required=True, choices=['buckeye', 'mandarin'])
     parser.add_argument('--feature_type', required=True,
-                        choices=['mfcc', 'hubert_base_ls960'],
-                        help='Feature type to extract')
-    parser.add_argument('--layer', type=int, default=10,
-                        help='HuBERT transformer layer (1-12, default: 10)')
-    parser.add_argument('--device', default='cpu',
-                        help='Device for HuBERT inference: cpu or cuda (default: cpu)')
+                        choices=['mfcc'] + list(NEURAL_MODELS))
+    parser.add_argument('--layer',  type=int, default=10)
+    parser.add_argument('--device', default='cpu')
     args = parser.parse_args()
 
-    wav_files = sorted(Path(args.wav_dir).glob('*.wav'))
-    if not wav_files:
-        print(f"No WAV files found in {args.wav_dir}")
-        return
+    vad = parse_vad(args.vad_file)
+    recordings = ([args.recording] if args.recording
+                  else [r for r in sorted(vad) if r in vad])
 
-    print(f"Found {len(wav_files)} WAV file(s) in {args.wav_dir}")
+    is_neural = args.feature_type in NEURAL_MODELS
+    model, processor = load_model(args.feature_type, args.device) if is_neural else (None, None)
+    hop = NEURAL_HOP if is_neural else MFCC_HOP
 
-    if args.feature_type == 'hubert_base_ls960':
-        model, processor = load_hubert_model(args.device)
-        hop_length = HUBERT_HOP_LENGTH
-        min_dist = HUBERT_MIN_DIST_FRAMES
-    else:
-        hop_length = MFCC_HOP_LENGTH
-        min_dist = MFCC_MIN_DIST_FRAMES
+    print(f"{len(recordings)} recording(s)  feature={args.feature_type}")
 
-    features = {}
-    landmarks = {}
+    for rec_id in recordings:
+        if rec_id not in vad:
+            print(f"[{rec_id}] not in VAD, skipping")
+            continue
 
-    for wav_path in wav_files:
-        print(f"  {wav_path.name} ...", end=' ', flush=True)
-        y = load_audio(wav_path)
+        wav = find_wav(args.buckeye_dir, rec_id)
+        if wav is None:
+            print(f"[{rec_id}] WAV not found, skipping")
+            continue
 
-        if args.feature_type == 'mfcc':
-            feats = extract_mfcc(y)
-        else:
-            feats = extract_hubert(y, model, processor, args.layer, args.device)
+        boundaries = load_landmarks(args.landmark_dir, rec_id)
+        if boundaries is None:
+            print(f"[{rec_id}] landmark file not found in {args.landmark_dir}, skipping")
+            continue
 
-        raw_lm = compute_landmarks(feats, min_dist)
-        lm_cs = [to_centiseconds(i, hop_length) for i in raw_lm]
-        n_cs = to_centiseconds(len(feats) - 1, hop_length)
+        print(f"\n[{rec_id}]  {len(vad[rec_id])} segments  {len(boundaries)} boundaries")
+        y_full = load_audio(str(wav))
 
-        # Utterance ID format: <stem>_<start_cs>-<end_cs>
-        utt_id = f"{wav_path.stem}_0-{n_cs}"
-        features[utt_id] = feats
-        landmarks[utt_id] = lm_cs
-        print(f"{len(feats)} frames, {len(lm_cs)} landmarks")
+        data = {}
+        for start_sec, end_sec in vad[rec_id]:
+            y_seg = y_full[int(start_sec * SR): min(int(end_sec * SR), len(y_full))]
+            if len(y_seg) < SR * 0.05:
+                continue
 
-    base = resolve_output_base()
+            feats = (extract_mfcc(y_seg) if not is_neural
+                     else extract_neural(y_seg, model, processor, args.layer, args.device))
+            if len(feats) < 2:
+                continue
 
-    # Landmarks are always saved under the mfcc_herman path (shared across feature types)
-    lm_dir = Path(base) / 'zerospeech_seg' / 'mfcc_herman' / args.language / args.speaker
-    lm_dir.mkdir(parents=True, exist_ok=True)
-    lm_path = lm_dir / 'landmarks.pkl'
-    with open(lm_path, 'wb') as f:
-        pickle.dump(landmarks, f)
-    print(f"\nSaved landmarks ({len(landmarks)} utterances) → {lm_path}")
+            utt_id = f"{rec_id}_{int(start_sec * 100)}-{int(end_sec * 100)}"
+            data[utt_id] = {
+                'features':  feats,
+                'landmarks': landmarks_for_segment(boundaries, start_sec, end_sec, hop),
+            }
 
-    # Features
-    if args.feature_type == 'mfcc':
-        feat_path = lm_dir / 'raw_mfcc.npz'
-    else:
-        feat_dir = (Path(base) / 'hubert_data' / 'seg' / 'zsc' /
-                    args.feature_type / str(args.layer) / args.language / 'prevad')
-        feat_dir.mkdir(parents=True, exist_ok=True)
-        feat_path = feat_dir / f"{args.speaker}_features_frame.npz"
+        print(f"  {len(data)} utterances")
+        out = data_path(args.language, rec_id, args.feature_type, args.layer)
+        out.parent.mkdir(parents=True, exist_ok=True)
+        with open(out, 'wb') as f:
+            pickle.dump(data, f)
+        print(f"  → {out}")
 
-    np.savez(feat_path, **features)
-    print(f"Saved features → {feat_path}")
-    print("Done.")
+    print("\nDone.")
 
 
 if __name__ == '__main__':
