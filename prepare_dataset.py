@@ -1,52 +1,45 @@
 #!/usr/bin/env python3
 """
-Dataset preparation for ESKMeans — ZeroSpeech / Buckeye.
+Dataset preparation for ESKMeans — ZeroSpeech / Buckeye / Xitsonga.
 
-Steps:
-  1. (External, MATLAB) Run thetaOscillator on each recording to get syllable
-     boundaries. Save one text file per recording under --landmark_dir:
-         s0101a.txt   (one boundary in seconds per line, absolute time in recording)
-  2. (This script) Run feature extraction + package everything as one pickle
-     per recording per feature type.
+Computes syllable-like landmarks using the thetaOscillator (Räsänen et al. 2018)
+and extracts acoustic features, packaging everything as one pickle per speaker.
 
 Output:
-    <ESKMEANS_DATA>/<language>/<recording_id>/mfcc.pkl
-    <ESKMEANS_DATA>/<language>/<recording_id>/hubert_base_ls960_l10.pkl
+    <ESKMEANS_DATA>/<language>/<speaker_id>/mfcc.pkl
+    <ESKMEANS_DATA>/<language>/<speaker_id>/hubert_base_ls960_l10.pkl
     ...
 
 Each pickle:  utt_id → {'features': np.ndarray, 'landmarks': [int, ...]}
 Utterance IDs: <recording_id>_<start_cs>-<end_cs>  (centiseconds)
 
-Landmark file format (produced by thetaOscillator):
-    One boundary per line in seconds (absolute time in the recording).
-    Example s0101a.txt:
-        0.321
-        0.487
-        1.203
-        ...
-
-ZeroSpeech VAD file:
-    mkdir -p data/zerospeech
+VAD files (download once):
     curl -o data/zerospeech/english_vad.txt \
         https://raw.githubusercontent.com/zerospeech/Zerospeech2015/master/english_vad.txt
+    curl -o data/zerospeech/xitsonga_vad.txt \
+        https://raw.githubusercontent.com/zerospeech/Zerospeech2015/master/xitsonga_vad.txt
 
 Usage:
     export ESKMEANS_DATA=/shared/ramon/experiments_old
 
+    # Buckeye (English)
     python prepare_dataset.py \
-        --buckeye_dir /path/to/buckeye \
+        --audio_dir /path/to/buckeye \
         --vad_file data/zerospeech/english_vad.txt \
-        --landmark_dir /path/to/theta_oscillator_output \
         --recording s0101a --language buckeye --feature_type mfcc
 
-    # all recordings in parallel
-    cat data/file_list/buckeye_spk | parallel \
+    # Xitsonga — each speaker is processed as one unit
+    python prepare_dataset.py \
+        --audio_dir /path/to/nchlt_tso/audio \
+        --vad_file data/zerospeech/xitsonga_vad.txt \
+        --recording 001 --language xitsonga --feature_type mfcc
+
+    # all speakers in parallel
+    cat data/file_list/xitsonga_spk | parallel \
         python prepare_dataset.py \
-            --buckeye_dir /path/to/buckeye \
-            --vad_file data/zerospeech/english_vad.txt \
-            --landmark_dir /path/to/theta_oscillator_output \
-            --recording {} --language buckeye \
-            --feature_type hubert_base_ls960 --layer 10 --device cuda
+            --audio_dir /path/to/nchlt_tso/audio \
+            --vad_file data/zerospeech/xitsonga_vad.txt \
+            --recording {} --language xitsonga --feature_type mfcc
 
 Feature types:  mfcc | hubert_base_ls960 | mhubert | wavlm_large
 """
@@ -70,44 +63,76 @@ NEURAL_MODELS = {
 }
 
 
-def data_path(language, recording_id, feature_type, layer):
+def data_path(language, speaker_id, feature_type, layer):
     base = os.environ.get('ESKMEANS_DATA', DEFAULT_DATA_DIR)
     fname = 'mfcc.pkl' if feature_type == 'mfcc' else f'{feature_type}_l{layer}.pkl'
-    return Path(base) / language / recording_id / fname
+    return Path(base) / language / speaker_id / fname
 
 
 # ---------------------------------------------------------------------------
 # VAD
 # ---------------------------------------------------------------------------
 
-def parse_vad(vad_file):
-    """ZeroSpeech VAD format: file_id,start_sec,end_sec"""
+def parse_vad_buckeye(vad_file):
+    """ZeroSpeech English VAD: comma-separated  file_id,start_sec,end_sec
+    Returns {recording_id: [(start, end), ...]}"""
     vad = defaultdict(list)
     with open(vad_file) as f:
         for line in f:
             parts = line.strip().split(',')
             if len(parts) == 3:
-                vad[parts[0].strip()].append((float(parts[1]), float(parts[2])))
+                try:
+                    vad[parts[0].strip()].append((float(parts[1]), float(parts[2])))
+                except ValueError:
+                    pass  # skip header
     return {k: sorted(v) for k, v in vad.items()}
+
+
+def parse_vad_xitsonga(vad_file):
+    """ZeroSpeech Xitsonga VAD: space-separated  file_id start_sec end_sec
+    Returns {speaker_id: [(file_id, start, end), ...]} grouped by speaker."""
+    by_speaker = defaultdict(list)
+    with open(vad_file) as f:
+        for line in f:
+            parts = line.strip().split()
+            if len(parts) == 3:
+                try:
+                    file_id, start, end = parts[0], float(parts[1]), float(parts[2])
+                    # nchlt_tso_001m_0007 → speaker 001
+                    spk = file_id.split('_')[2][:3]
+                    by_speaker[spk].append((file_id, start, end))
+                except (ValueError, IndexError):
+                    pass
+    return dict(by_speaker)
 
 
 # ---------------------------------------------------------------------------
 # Landmarks
 # ---------------------------------------------------------------------------
 
+def compute_landmarks(y_seg, dur_cs):
+    """
+    Compute thetaOscillator syllable boundaries for an audio segment.
+    Returns a list of centisecond offsets (relative to segment start),
+    always ending with dur_cs.
+    """
+    from theta_oscillator import get_boundaries
+    boundary_times = get_boundaries(y_seg, fs=SR)
+    lm = [int(t * 100) for t in boundary_times if 0 < t * 100 < dur_cs]
+    lm = sorted(set(lm))
+    if not lm or lm[-1] != dur_cs:
+        lm.append(dur_cs)
+    return lm
+
+
 def load_landmarks(landmark_dir, recording_id):
-    """
-    Load thetaOscillator boundaries for a recording.
-    Expected file: <landmark_dir>/<recording_id>.txt
-    One boundary per line in seconds (absolute time in the recording).
-    Returns sorted list of floats, or None if file not found.
-    """
+    """Load pre-computed thetaOscillator boundary file (one sec per line)."""
     path = Path(landmark_dir) / f"{recording_id}.txt"
     if not path.exists():
         return None
     boundaries = []
-    with open(path) as f:
-        for line in f:
+    with open(path) as fh:
+        for line in fh:
             line = line.strip()
             if line and not line.startswith('#'):
                 try:
@@ -117,36 +142,40 @@ def load_landmarks(landmark_dir, recording_id):
     return sorted(boundaries)
 
 
-def landmarks_for_segment(all_boundaries, start_sec, end_sec, hop):
-    """
-    Select boundaries that fall within [start_sec, end_sec] and convert
-    to centisecond offsets relative to the segment start.
-    Always appends the last frame of the segment as a boundary.
-    """
-    dur_cs = int((end_sec - start_sec) * 100)
+def landmarks_from_file(all_boundaries, start_sec, end_sec, dur_cs):
+    """Select pre-computed boundaries within [start_sec, end_sec] → centisecond offsets."""
     lm = []
     for t in all_boundaries:
         if start_sec <= t < end_sec:
             cs = int((t - start_sec) * 100)
-            if cs > 0:
+            if 0 < cs < dur_cs:
                 lm.append(cs)
+    lm = sorted(set(lm))
     if not lm or lm[-1] != dur_cs:
         lm.append(dur_cs)
-    return sorted(set(lm))
+    return lm
 
 
 # ---------------------------------------------------------------------------
 # Audio & features
 # ---------------------------------------------------------------------------
 
-def find_wav(buckeye_dir, recording_id):
+def find_wav_buckeye(audio_dir, recording_id):
+    """Buckeye: <audio_dir>/<spk3>/<recording_id>.wav"""
     for path in [
-        Path(buckeye_dir) / recording_id[:3] / f"{recording_id}.wav",
-        Path(buckeye_dir) / f"{recording_id}.wav",
+        Path(audio_dir) / recording_id[:3] / f"{recording_id}.wav",
+        Path(audio_dir) / f"{recording_id}.wav",
     ]:
         if path.exists():
             return path
     return None
+
+
+def find_wav_xitsonga(audio_dir, file_id):
+    """NCHLT: <audio_dir>/<spk3>/<file_id>.wav"""
+    spk = file_id.split('_')[2][:3]
+    path = Path(audio_dir) / spk / f"{file_id}.wav"
+    return path if path.exists() else None
 
 
 def load_audio(path):
@@ -179,77 +208,139 @@ def load_model(feature_type, device):
 
 
 # ---------------------------------------------------------------------------
+# Per-segment processing (shared by both languages)
+# ---------------------------------------------------------------------------
+
+def process_segment(y_seg, start_sec, end_sec, rec_id,
+                    is_neural, model, processor, layer, device,
+                    file_boundaries):
+    import librosa
+    if len(y_seg) < SR * 0.05:
+        return None, None
+
+    feats = (extract_mfcc(y_seg) if not is_neural
+             else extract_neural(y_seg, model, processor, layer, device))
+    if len(feats) < 2:
+        return None, None
+
+    dur_cs = int((end_sec - start_sec) * 100)
+    if file_boundaries is not None:
+        lm = landmarks_from_file(file_boundaries, start_sec, end_sec, dur_cs)
+    else:
+        lm = compute_landmarks(y_seg, dur_cs)
+
+    utt_id = f"{rec_id}_{int(start_sec * 100)}-{int(end_sec * 100)}"
+    return utt_id, {'features': feats, 'landmarks': lm}
+
+
+# ---------------------------------------------------------------------------
 # Entry point
 # ---------------------------------------------------------------------------
 
 def main():
     parser = argparse.ArgumentParser(
         formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument('--buckeye_dir',  required=True)
+    parser.add_argument('--audio_dir',    required=True,
+                        help='Buckeye root or NCHLT nchlt_tso/audio directory')
     parser.add_argument('--vad_file',     required=True)
-    parser.add_argument('--landmark_dir', required=True,
-                        help='Directory with thetaOscillator output files '
-                             '(<recording_id>.txt, one boundary in seconds per line)')
-    parser.add_argument('--recording', default=None,
-                        help='Recording ID (e.g. s0101a). Omit for all in VAD.')
-    parser.add_argument('--language',     required=True, choices=['buckeye', 'mandarin'])
+    parser.add_argument('--landmark_dir', default=None,
+                        help='Optional: pre-computed thetaOscillator boundary files')
+    parser.add_argument('--recording',    default=None,
+                        help='Speaker/recording ID to process. Omit for all in VAD.')
+    parser.add_argument('--language',     required=True,
+                        choices=['buckeye', 'xitsonga', 'mandarin'])
     parser.add_argument('--feature_type', required=True,
                         choices=['mfcc'] + list(NEURAL_MODELS))
     parser.add_argument('--layer',  type=int, default=10)
     parser.add_argument('--device', default='cpu')
     args = parser.parse_args()
 
-    vad = parse_vad(args.vad_file)
-    recordings = ([args.recording] if args.recording
-                  else [r for r in sorted(vad) if r in vad])
-
     is_neural = args.feature_type in NEURAL_MODELS
     model, processor = load_model(args.feature_type, args.device) if is_neural else (None, None)
-    hop = NEURAL_HOP if is_neural else MFCC_HOP
 
-    print(f"{len(recordings)} recording(s)  feature={args.feature_type}")
+    # ---- Xitsonga ----
+    if args.language == 'xitsonga':
+        vad = parse_vad_xitsonga(args.vad_file)
+        speakers = ([args.recording] if args.recording else sorted(vad))
+        print(f"{len(speakers)} speaker(s)  feature={args.feature_type}")
 
-    for rec_id in recordings:
-        if rec_id not in vad:
-            print(f"[{rec_id}] not in VAD, skipping")
-            continue
-
-        wav = find_wav(args.buckeye_dir, rec_id)
-        if wav is None:
-            print(f"[{rec_id}] WAV not found, skipping")
-            continue
-
-        boundaries = load_landmarks(args.landmark_dir, rec_id)
-        if boundaries is None:
-            print(f"[{rec_id}] landmark file not found in {args.landmark_dir}, skipping")
-            continue
-
-        print(f"\n[{rec_id}]  {len(vad[rec_id])} segments  {len(boundaries)} boundaries")
-        y_full = load_audio(str(wav))
-
-        data = {}
-        for start_sec, end_sec in vad[rec_id]:
-            y_seg = y_full[int(start_sec * SR): min(int(end_sec * SR), len(y_full))]
-            if len(y_seg) < SR * 0.05:
+        for spk in speakers:
+            if spk not in vad:
+                print(f"[{spk}] not in VAD, skipping")
                 continue
 
-            feats = (extract_mfcc(y_seg) if not is_neural
-                     else extract_neural(y_seg, model, processor, args.layer, args.device))
-            if len(feats) < 2:
+            entries = vad[spk]
+            print(f"\n[{spk}]  {len(entries)} utterances")
+            data = {}
+
+            for file_id, start_sec, end_sec in entries:
+                wav = find_wav_xitsonga(args.audio_dir, file_id)
+                if wav is None:
+                    print(f"  WAV not found: {file_id}, skipping")
+                    continue
+
+                y_full = load_audio(str(wav))
+                y_seg = y_full[int(start_sec * SR): min(int(end_sec * SR), len(y_full))]
+
+                file_boundaries = (load_landmarks(args.landmark_dir, file_id)
+                                   if args.landmark_dir else None)
+
+                utt_id, entry = process_segment(
+                    y_seg, start_sec, end_sec, file_id,
+                    is_neural, model, processor, args.layer, args.device,
+                    file_boundaries)
+                if utt_id:
+                    data[utt_id] = entry
+
+            print(f"  {len(data)} segments extracted")
+            out = data_path(args.language, spk, args.feature_type, args.layer)
+            out.parent.mkdir(parents=True, exist_ok=True)
+            with open(out, 'wb') as f:
+                pickle.dump(data, f)
+            print(f"  → {out}")
+
+    # ---- Buckeye / Mandarin ----
+    else:
+        vad = parse_vad_buckeye(args.vad_file)
+        recordings = ([args.recording] if args.recording
+                      else [r for r in sorted(vad) if r in vad])
+        print(f"{len(recordings)} recording(s)  feature={args.feature_type}")
+
+        for rec_id in recordings:
+            if rec_id not in vad:
+                print(f"[{rec_id}] not in VAD, skipping")
                 continue
 
-            utt_id = f"{rec_id}_{int(start_sec * 100)}-{int(end_sec * 100)}"
-            data[utt_id] = {
-                'features':  feats,
-                'landmarks': landmarks_for_segment(boundaries, start_sec, end_sec, hop),
-            }
+            wav = find_wav_buckeye(args.audio_dir, rec_id)
+            if wav is None:
+                print(f"[{rec_id}] WAV not found, skipping")
+                continue
 
-        print(f"  {len(data)} utterances")
-        out = data_path(args.language, rec_id, args.feature_type, args.layer)
-        out.parent.mkdir(parents=True, exist_ok=True)
-        with open(out, 'wb') as f:
-            pickle.dump(data, f)
-        print(f"  → {out}")
+            file_boundaries = (load_landmarks(args.landmark_dir, rec_id)
+                                if args.landmark_dir else None)
+            if args.landmark_dir and file_boundaries is None:
+                print(f"[{rec_id}] landmark file not found, skipping")
+                continue
+
+            print(f"\n[{rec_id}]  {len(vad[rec_id])} segments")
+            y_full = load_audio(str(wav))
+            data = {}
+
+            for start_sec, end_sec in vad[rec_id]:
+                y_seg = y_full[int(start_sec * SR): min(int(end_sec * SR), len(y_full))]
+                utt_id, entry = process_segment(
+                    y_seg, start_sec, end_sec, rec_id,
+                    is_neural, model, processor, args.layer, args.device,
+                    file_boundaries)
+                if utt_id:
+                    data[utt_id] = entry
+
+            print(f"  {len(data)} utterances")
+            out = data_path(args.language, rec_id, args.feature_type, args.layer)
+            out.parent.mkdir(parents=True, exist_ok=True)
+            with open(out, 'wb') as f:
+                pickle.dump(data, f)
+            print(f"  → {out}")
 
     print("\nDone.")
 

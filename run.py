@@ -19,7 +19,7 @@ FEAT_DIMS = {
 
 parser = argparse.ArgumentParser(description='ESKMeans segmentation')
 parser.add_argument('--language',     dest='lan', type=str,
-                    choices=["buckeye", "mandarin"])
+                    choices=["buckeye", "xitsonga", "mandarin"])
 parser.add_argument('--speaker',      dest='spk', type=str)
 parser.add_argument('--feature_type', type=str, choices=list(FEAT_DIMS))
 parser.add_argument('--pooling_type', type=str, choices=["herman", "average"])
