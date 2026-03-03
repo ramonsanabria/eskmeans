@@ -138,7 +138,7 @@ def shortest_path(g):
             w, _ = g.weight(e)
             cand = d[g.tail[e]] + w
 
-            if cand > m:
+            if arg == -1 or cand > m:
                 m = cand
                 arg = e
 
@@ -228,7 +228,7 @@ def eskmeans(landmarks,
 
         print("ITERATION: ", epoch)
 
-        if not unit_test:
+        if not unit_test_flag:
             random.shuffle(utt_idxs)
 
         nll_epoch = 0

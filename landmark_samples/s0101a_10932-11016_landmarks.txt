@@ -1,0 +1,9 @@
+# utterance: s0101a_10932-11016
+# duration: 0.840s
+# 6 landmarks (centiseconds → seconds)
+  19 cs  =  0.190 s
+  33 cs  =  0.330 s
+  48 cs  =  0.480 s
+  64 cs  =  0.640 s
+  84 cs  =  0.840 s
+  85 cs  =  0.850 s

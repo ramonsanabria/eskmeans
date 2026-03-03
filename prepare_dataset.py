@@ -22,24 +22,31 @@ VAD files (download once):
 Usage:
     export ESKMEANS_DATA=/shared/ramon/experiments_old
 
-    # Buckeye (English)
+    # ZeroSpeech 2015 languages (english/french/german/mandarin/wolof)
+    # --audio_dir points to the language root, --subset selects 1s / 10s / 120s
+    # Use 120s for TDE evaluation (recommended).
+    python prepare_dataset.py \
+        --audio_dir /shared/ramon/experiments_old/english \
+        --subset 120s --language english --feature_type mfcc
+
+    # process all languages in parallel
+    for lang in english french german mandarin wolof; do
+        python prepare_dataset.py \
+            --audio_dir /shared/ramon/experiments_old/$lang \
+            --subset 120s --language $lang --feature_type mfcc &
+    done; wait
+
+    # Buckeye
     python prepare_dataset.py \
         --audio_dir /path/to/buckeye \
         --vad_file data/zerospeech/english_vad.txt \
         --recording s0101a --language buckeye --feature_type mfcc
 
-    # Xitsonga — each speaker is processed as one unit
+    # Xitsonga
     python prepare_dataset.py \
         --audio_dir /path/to/nchlt_tso/audio \
         --vad_file data/zerospeech/xitsonga_vad.txt \
         --recording 001 --language xitsonga --feature_type mfcc
-
-    # all speakers in parallel
-    cat data/file_list/xitsonga_spk | parallel \
-        python prepare_dataset.py \
-            --audio_dir /path/to/nchlt_tso/audio \
-            --vad_file data/zerospeech/xitsonga_vad.txt \
-            --recording {} --language xitsonga --feature_type mfcc
 
 Feature types:  mfcc | hubert_base_ls960 | mhubert | wavlm_large
 """
@@ -86,6 +93,51 @@ def parse_vad_buckeye(vad_file):
                 except ValueError:
                     pass  # skip header
     return {k: sorted(v) for k, v in vad.items()}
+
+
+def parse_vad_from_words(words_path, merge_gap=0.3, min_dur=0.1):
+    """Derive VAD from a Buckeye .words file (Kamper-style).
+
+    Each line after the header:  end_time  channel  word; phon; canon; POS
+    Labels wrapped in <> or {} are non-speech (SIL, NOISE, IVER, etc.).
+    Consecutive speech intervals separated by <= merge_gap are merged.
+    Returns [(start_sec, end_sec), ...]
+    """
+    spans = []
+    prev_end = 0.0
+    in_header = True
+    with open(words_path) as f:
+        for line in f:
+            line = line.strip()
+            if in_header:
+                if line == '#':
+                    in_header = False
+                continue
+            parts = line.split()
+            if len(parts) < 3:
+                continue
+            try:
+                end_time = float(parts[0])
+            except ValueError:
+                continue
+            label = parts[2].split(';')[0]   # word field before first ';'
+            start_time = prev_end
+            prev_end = end_time
+            if label.startswith('<') or label.startswith('{'):
+                continue   # non-speech
+            spans.append((start_time, end_time))
+
+    if not spans:
+        return []
+
+    merged = [list(spans[0])]
+    for s, e in spans[1:]:
+        if s - merged[-1][1] <= merge_gap:
+            merged[-1][1] = e
+        else:
+            merged.append([s, e])
+
+    return [(s, e) for s, e in merged if e - s >= min_dur]
 
 
 def parse_vad_xitsonga(vad_file):
@@ -203,7 +255,7 @@ def load_model(feature_type, device):
     from transformers import AutoModel, AutoFeatureExtractor
     hf_id = NEURAL_MODELS[feature_type]
     print(f"Loading {hf_id} ...")
-    return (AutoModel.from_pretrained(hf_id).eval().to(device),
+    return (AutoModel.from_pretrained(hf_id, attn_implementation='eager').eval().to(device),
             AutoFeatureExtractor.from_pretrained(hf_id))
 
 
@@ -223,13 +275,15 @@ def process_segment(y_seg, start_sec, end_sec, rec_id,
     if len(feats) < 2:
         return None, None
 
-    dur_cs = int((end_sec - start_sec) * 100)
+    start_cs = round(start_sec * 100)
+    end_cs = round(end_sec * 100)
+    dur_cs = end_cs - start_cs
     if file_boundaries is not None:
         lm = landmarks_from_file(file_boundaries, start_sec, end_sec, dur_cs)
     else:
         lm = compute_landmarks(y_seg, dur_cs)
 
-    utt_id = f"{rec_id}_{int(start_sec * 100)}-{int(end_sec * 100)}"
+    utt_id = f"{rec_id}_{start_cs}-{end_cs}"
     return utt_id, {'features': feats, 'landmarks': lm}
 
 
@@ -241,25 +295,82 @@ def main():
     parser = argparse.ArgumentParser(
         formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument('--audio_dir',    required=True,
-                        help='Buckeye root or NCHLT nchlt_tso/audio directory')
-    parser.add_argument('--vad_file',     required=True)
+                        help='Language root dir (ZeroSpeech) or WAV dir (Buckeye/Xitsonga)')
+    parser.add_argument('--vad_file',     default=None,
+                        help='VAD CSV file (Buckeye/Xitsonga). Not needed for ZeroSpeech subsets.')
+    parser.add_argument('--subset',       default=None, choices=['1s', '10s', '120s'],
+                        help='ZeroSpeech subset to process (1s/10s/120s). '
+                             'Omit for Buckeye/Xitsonga VAD-based mode.')
     parser.add_argument('--landmark_dir', default=None,
                         help='Optional: pre-computed thetaOscillator boundary files')
     parser.add_argument('--recording',    default=None,
-                        help='Speaker/recording ID to process. Omit for all in VAD.')
+                        help='Speaker/recording ID to process. Omit for all.')
     parser.add_argument('--language',     required=True,
-                        choices=['buckeye', 'xitsonga', 'mandarin'])
+                        choices=['buckeye', 'xitsonga',
+                                 'english', 'french', 'german', 'mandarin', 'wolof'])
     parser.add_argument('--feature_type', required=True,
                         choices=['mfcc'] + list(NEURAL_MODELS))
     parser.add_argument('--layer',  type=int, default=10)
     parser.add_argument('--device', default='cpu')
     args = parser.parse_args()
 
+    if args.subset is None and args.vad_file is None and args.language not in ('buckeye',):
+        parser.error('Either --subset (ZeroSpeech mode) or --vad_file (VAD mode) is required '
+                     '(buckeye can derive VAD from .phones files without --vad_file).')
+
     is_neural = args.feature_type in NEURAL_MODELS
     model, processor = load_model(args.feature_type, args.device) if is_neural else (None, None)
 
+    # ---- ZeroSpeech 2015 (english / french / german / mandarin / wolof) ----
+    if args.subset is not None:
+        subset_dir = Path(args.audio_dir) / args.subset
+        if not subset_dir.exists():
+            print(f"Subset directory not found: {subset_dir}")
+            return
+
+        wav_files = sorted(subset_dir.glob('*.wav'),
+                           key=lambda p: int(p.stem) if p.stem.isdigit() else p.stem)
+
+        if args.recording is not None:
+            wav_files = [f for f in wav_files if f.stem == args.recording]
+
+        print(f"[{args.language}/{args.subset}]  {len(wav_files)} WAV files  "
+              f"feature={args.feature_type}")
+
+        data = {}
+        for wav_path in wav_files:
+            file_id = wav_path.stem
+            y = load_audio(str(wav_path))
+            dur_sec = len(y) / SR
+            dur_cs  = int(dur_sec * 100)
+
+            if len(y) < SR * 0.05:
+                continue
+
+            feats = (extract_mfcc(y) if not is_neural
+                     else extract_neural(y, model, processor, args.layer, args.device))
+            if len(feats) < 2:
+                continue
+
+            file_boundaries = (load_landmarks(args.landmark_dir, file_id)
+                                if args.landmark_dir else None)
+            if file_boundaries is not None:
+                lm = landmarks_from_file(file_boundaries, 0.0, dur_sec, dur_cs)
+            else:
+                lm = compute_landmarks(y, dur_cs)
+
+            utt_id = f"{file_id}_0-{dur_cs}"
+            data[utt_id] = {'features': feats, 'landmarks': lm}
+
+        print(f"  {len(data)} utterances extracted")
+        out = data_path(args.language, args.subset, args.feature_type, args.layer)
+        out.parent.mkdir(parents=True, exist_ok=True)
+        with open(out, 'wb') as f:
+            pickle.dump(data, f)
+        print(f"  → {out}")
+
     # ---- Xitsonga ----
-    if args.language == 'xitsonga':
+    elif args.language == 'xitsonga':
         vad = parse_vad_xitsonga(args.vad_file)
         speakers = ([args.recording] if args.recording else sorted(vad))
         print(f"{len(speakers)} speaker(s)  feature={args.feature_type}")
@@ -299,22 +410,42 @@ def main():
                 pickle.dump(data, f)
             print(f"  → {out}")
 
-    # ---- Buckeye / Mandarin ----
+    # ---- Buckeye (phones-based VAD) or CSV VAD ----
     else:
-        vad = parse_vad_buckeye(args.vad_file)
-        recordings = ([args.recording] if args.recording
-                      else [r for r in sorted(vad) if r in vad])
+        if args.vad_file:
+            vad_csv = parse_vad_buckeye(args.vad_file)
+            recordings = ([args.recording] if args.recording
+                          else sorted(vad_csv))
+        else:
+            # discover all recordings from WAV files in the audio_dir tree
+            vad_csv = None
+            wav_paths = sorted(Path(args.audio_dir).rglob('*.wav'))
+            recordings = ([args.recording] if args.recording
+                          else [p.stem for p in wav_paths])
+
         print(f"{len(recordings)} recording(s)  feature={args.feature_type}")
 
         for rec_id in recordings:
-            if rec_id not in vad:
-                print(f"[{rec_id}] not in VAD, skipping")
-                continue
-
             wav = find_wav_buckeye(args.audio_dir, rec_id)
             if wav is None:
                 print(f"[{rec_id}] WAV not found, skipping")
                 continue
+
+            if vad_csv is not None:
+                if rec_id not in vad_csv:
+                    print(f"[{rec_id}] not in VAD, skipping")
+                    continue
+                segments = vad_csv[rec_id]
+            else:
+                # derive VAD from the .words file next to the WAV (Kamper-style)
+                words_path = wav.with_suffix('.words')
+                if not words_path.exists():
+                    print(f"[{rec_id}] no .words file, skipping")
+                    continue
+                segments = parse_vad_from_words(words_path)
+                if not segments:
+                    print(f"[{rec_id}] no speech found in words file, skipping")
+                    continue
 
             file_boundaries = (load_landmarks(args.landmark_dir, rec_id)
                                 if args.landmark_dir else None)
@@ -322,11 +453,11 @@ def main():
                 print(f"[{rec_id}] landmark file not found, skipping")
                 continue
 
-            print(f"\n[{rec_id}]  {len(vad[rec_id])} segments")
+            print(f"\n[{rec_id}]  {len(segments)} segments")
             y_full = load_audio(str(wav))
             data = {}
 
-            for start_sec, end_sec in vad[rec_id]:
+            for start_sec, end_sec in segments:
                 y_seg = y_full[int(start_sec * SR): min(int(end_sec * SR), len(y_full))]
                 utt_id, entry = process_segment(
                     y_seg, start_sec, end_sec, rec_id,

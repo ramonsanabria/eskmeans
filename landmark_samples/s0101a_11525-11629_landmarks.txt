@@ -1,0 +1,7 @@
+# utterance: s0101a_11525-11629
+# duration: 1.040s
+# 4 landmarks (centiseconds → seconds)
+  27 cs  =  0.270 s
+  52 cs  =  0.520 s
+ 104 cs  =  1.040 s
+ 105 cs  =  1.050 s

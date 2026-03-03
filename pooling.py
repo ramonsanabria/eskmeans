@@ -66,7 +66,9 @@ class PoolingEngine:
         end = end+1
         start = int(start/self.freq_red)
         end = int(end/self.freq_red)
-        feats =  feats[start:end,:]
+        feats = feats[start:end,:]
+        if len(feats) == 0:
+            feats = np.zeros((1, self.feature_dim))
 
         if self.method == 'subsample':
             return self.__subsample(feats)

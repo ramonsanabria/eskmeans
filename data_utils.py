@@ -75,3 +75,30 @@ def load_dataset(language, speaker, feature_type, minimum_duration,
         unit_test.utterance_ids(feat_dict, language, speaker)
 
     return filter_short_segments(landmarks_dict, feat_dict, minimum_duration)
+
+
+def load_all_speakers(language, feature_type, minimum_duration,
+                      unit_test_flag, feature_layer="10"):
+    """Load and merge data from all speaker directories for a language."""
+    lang_dir = Path(os.environ.get('ESKMEANS_DATA', DEFAULT_DATA_DIR)) / language
+    feat_dict = {}
+    landmarks_dict = {}
+
+    speakers = sorted(d.name for d in lang_dir.iterdir()
+                      if d.is_dir() and not d.name.startswith('nchlt'))
+    print(f"Loading {len(speakers)} speakers: {speakers}")
+
+    for spk in speakers:
+        pkl_path = lang_dir / spk / feature_filename(feature_type, feature_layer)
+        if not pkl_path.exists():
+            print(f"  [{spk}] missing {pkl_path.name}, skipping")
+            continue
+        with open(pkl_path, 'rb') as f:
+            raw = pickle.load(f)
+        for k, v in raw.items():
+            feat_dict[k] = v['features']
+            landmarks_dict[k] = v['landmarks']
+        print(f"  [{spk}] {len(raw)} utterances")
+
+    print(f"Total: {len(feat_dict)} utterances")
+    return filter_short_segments(landmarks_dict, feat_dict, minimum_duration)
