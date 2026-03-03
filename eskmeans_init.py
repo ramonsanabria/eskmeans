@@ -1,7 +1,5 @@
 import numpy as np
 
-import kaldi_io
-
 from collections import defaultdict
 
 import unit_test
@@ -10,7 +8,7 @@ import random
 import sys
 
 
-def spread_herman(landmarks, feats, pooling_function, feats_format, language, speaker_id, unit_test_flag):
+def spread_herman(landmarks, feats, pooling_function, language, speaker_id, unit_test_flag):
 
     #number of centroids is the 20% of the number of landmarks
     n_ladmarks = sum([len(value) for value in landmarks.values()])
@@ -31,13 +29,7 @@ def spread_herman(landmarks, feats, pooling_function, feats_format, language, sp
     random.shuffle(assignments)
 
 
-    if(feats_format == 'npz'):
-        feats_dict = feats
-    elif(feats_format == 'scp'):
-        feats_dict = kaldi_io.read_mat_scp(feats)
-    else:
-        print("feats_format not supported: "+str(feats_format))
-        sys.exit()
+    feats_dict = feats
 
     #maximum amount of landmarks in the dataset
     lengths = [ len(landmarks[key]) for key in landmarks.keys() ]
@@ -123,7 +115,6 @@ def initialize_clusters(landmarks,
                         feats,
                         cluster_init_type,
                         pooling_function,
-                        format,
                         language,
                         speaker_id,
                         max_edges,
@@ -133,7 +124,6 @@ def initialize_clusters(landmarks,
         num_centroids, den_centroids, initial_segments = spread_herman(landmarks,
                                                                        feats,
                                                                        pooling_function,
-                                                                       format,
                                                                        language,
                                                                        speaker_id,
                                                                        unit_test_flag)

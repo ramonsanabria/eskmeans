@@ -1,4 +1,3 @@
 numpy
 scipy
 tqdm
-kaldi_io

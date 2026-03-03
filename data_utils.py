@@ -2,93 +2,76 @@ import os
 import sys
 import pickle
 import numpy as np
-import unit_test
 from collections import defaultdict
-import socket
+from pathlib import Path
+
+DEFAULT_DATA_DIR = "/shared/ramon/experiments_old"
+
+
+def data_dir(language, speaker):
+    base = os.environ.get('ESKMEANS_DATA', DEFAULT_DATA_DIR)
+    return Path(base) / language / speaker
+
+
+def feature_filename(feature_type, feature_layer):
+    if feature_type == 'mfcc':
+        return 'mfcc.pkl'
+    return f'{feature_type}_l{feature_layer}.pkl'
+
 
 def write_ramons(unsup_landmarks, unsup_transcript, speaker_id, output_folder):
-
-    class_dict= defaultdict(list)
-    print("WRITING RESULTS AT: "+str(os.path.join(output_folder,speaker_id+".tdev")))
+    class_dict = defaultdict(list)
+    print("WRITING RESULTS AT: " + str(os.path.join(output_folder, speaker_id + ".tdev")))
 
     for key in unsup_transcript.keys():
         for idx, class_id in enumerate(unsup_transcript[key]):
-            start = float(key.split("_")[-1].split("-")[0])/100
+            start = float(key.split("_")[-1].split("-")[0]) / 100
             new_key = "_".join(key.split("_")[:-1])
+            final_start = start + float(unsup_landmarks[key][idx][0] / 100)
+            final_end = start + float(unsup_landmarks[key][idx][1] / 100)
+            class_dict[class_id].append((final_start, final_end, new_key))
 
-            final_start = start+float(unsup_landmarks[key][idx][0]/100)
-            final_end = start+float(unsup_landmarks[key][idx][1]/100)
-            class_dict[class_id].append((final_start,final_end,new_key))
-
-    with open(os.path.join(output_folder,speaker_id+".tdev"), "w") as result_file:
+    with open(os.path.join(output_folder, speaker_id + ".tdev"), "w") as result_file:
         for class_id in class_dict.keys():
-            result_file.write("Class "+str(class_id)+"\n")
+            result_file.write("Class " + str(class_id) + "\n")
             for segment in class_dict[class_id]:
-                result_file.write(str(segment[2])+" "+str(segment[0])+" "+str(segment[1])+"\n")
+                result_file.write(str(segment[2]) + " " + str(segment[0]) + " " + str(segment[1]) + "\n")
             result_file.write("\n")
 
-def filter_short_segments(landmarks_dict, feat_np, minimum_duration):
-    deleted_segments = 0
-    new_feat_np = {}
-    new_landmarks_dict = {}
 
+def filter_short_segments(landmarks_dict, feat_dict, minimum_duration):
+    deleted = 0
+    new_feats = {}
+    new_landmarks = {}
     for key in list(landmarks_dict.keys()):
         start, end = key.split("_")[-1].split("-")
-        if((int(end) - int(start)) < minimum_duration):
-            deleted_segments += 1
+        if (int(end) - int(start)) < minimum_duration:
+            deleted += 1
         else:
-            new_feat_np[key] = feat_np[key]
-            new_landmarks_dict[key] = landmarks_dict[key]
-
-    print(str(deleted_segments)+" deleted segments due to duration < "+str(minimum_duration))
-    return new_landmarks_dict, new_feat_np
-
-#TODO sanity check dataset
-def load_dataset(language,
-                 speaker,
-                 feature_type,
-                 minimum_duration,
-                 unit_test_flag,
-                 feature_layer="10",
-                 vad_position="prevad"):
-
-    if socket.gethostname() == "banff.inf.ed.ac.uk":
-        default_data_base = "/disk/scratch_fast/ramons/data"
-    else:
-        default_data_base = "/disk/scratch1/ramons/data"
-    data_base = os.environ.get('ESKMEANS_DATA', default_data_base)
-
-    main_path_base = os.path.join(data_base, "zerospeech_seg/mfcc_herman", language, speaker)
-
-    landmark_file = open(os.path.join(main_path_base, 'landmarks.pkl'), 'rb')
-    landmark = pickle.load(landmark_file)
-    landmark_file.close()   
-
-    landmarks_aux = {}
-    for key in sorted(landmark):
-        landmarks_aux[key] = landmark[key]
-    landmarks_dict = landmarks_aux
-
-    if(feature_type == "mfcc"):
-        feat_np = np.load(os.path.join(main_path_base, 'raw_mfcc.npz'))
-        return filter_short_segments(landmarks_dict, feat_np, minimum_duration)
-
-    elif feature_type in ("hubert_base_ls960", "mhubert", "wavlm_large"):
+            new_feats[key] = feat_dict[key]
+            new_landmarks[key] = landmarks_dict[key]
+    print(f"{deleted} segments removed (duration < {minimum_duration} cs)")
+    return new_landmarks, new_feats
 
 
-        main_path = os.path.join(data_base, "hubert_data/seg/zsc",
-                                     feature_type,
-                                     str(feature_layer),
-                                     language,
-                                     vad_position)
+def load_dataset(language, speaker, feature_type, minimum_duration,
+                 unit_test_flag, feature_layer="10"):
+    import unit_test
 
-        feat_np = np.load(os.path.join(main_path, speaker+"_features_frame.npz"))
+    pkl_path = data_dir(language, speaker) / feature_filename(feature_type, feature_layer)
 
-        if(unit_test_flag):
-            unit_test.utterance_ids(feat_np, language, speaker)
+    if not pkl_path.exists():
+        print(f"Data file not found: {pkl_path}")
+        sys.exit(1)
 
+    with open(pkl_path, 'rb') as f:
+        raw = pickle.load(f)
 
-        return filter_short_segments(landmarks_dict, feat_np, minimum_duration)
-    else:
-        print("format not supported")
-        sys.exit()
+    # raw is a dict: utt_id → {'features': ndarray, 'landmarks': [int, ...]}
+    feat_dict = {k: v['features'] for k, v in sorted(raw.items())}
+    landmarks_dict = {k: v['landmarks'] for k, v in sorted(raw.items())}
+
+    if unit_test_flag:
+        unit_test.utterance_ids(feat_dict, language, speaker)
+
+    return filter_short_segments(landmarks_dict, feat_dict, minimum_duration)
